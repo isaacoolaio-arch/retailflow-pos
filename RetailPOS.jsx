@@ -5,7 +5,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 // ═══════════════════════════════════════════════════════════════
 // Set this to your deployed Apps Script Web App URL
 // Leave empty to use demo/mock data mode
-const API_URL = ""; // e.g. "https://script.google.com/macros/s/YOUR_DEPLOYMENT_ID/exec"
+const API_URL = "https://script.google.com/macros/s/AKfycbwZ3aTUSC89PVPmE4J47oaq8lXeJqdyfBQrvU4xC4Eko9Tn9SZ7dKiCauMotsNpENur_g/exec"; // e.g. "https://script.google.com/macros/s/YOUR_DEPLOYMENT_ID/exec"
 const DEVICE_ID = "device_" + Math.random().toString(36).substr(2, 8);
 
 // ─── IndexedDB Offline Cache ──────────────────────────────────
