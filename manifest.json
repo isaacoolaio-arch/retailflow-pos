@@ -1,6 +1,6 @@
 {
-    "name": "RetailFlow POS",
-    "short_name": "RetailFlow",
+    "name": "Oola RetailFlow POS",
+    "short_name": "Oola RetailFlow",
     "description": "Point of Sale System for Retail Shops",
     "start_url": "./",
     "display": "standalone",
