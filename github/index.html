@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>RetailFlow POS</title>
+    <meta name="description" content="RetailFlow Point of Sale System">
+    <meta name="theme-color" content="#18181b">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <link rel="manifest" href="manifest.json">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏪</text></svg>">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        * { -webkit-tap-highlight-color: transparent; }
+        body { margin: 0; padding: 0; overflow: hidden; }
+        #loading {
+            position: fixed; inset: 0; background: #09090b;
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            font-family: 'DM Sans', system-ui, sans-serif; color: #a1a1aa; z-index: 9999;
+        }
+        #loading .logo { width: 80px; height: 80px; border-radius: 24px;
+            background: linear-gradient(135deg, #f59e0b, #ea580c);
+            display: flex; align-items: center; justify-content: center;
+            font-size: 40px; margin-bottom: 16px;
+            box-shadow: 0 8px 30px rgba(245,158,11,0.2);
+        }
+        #loading h1 { color: #fafafa; font-size: 24px; font-weight: 700; margin: 0 0 4px; }
+        #loading p { font-size: 14px; margin: 0; }
+        #loading .spinner { width: 32px; height: 32px; border: 3px solid #27272a;
+            border-top-color: #f59e0b; border-radius: 50%; margin-top: 24px;
+            animation: spin 0.8s linear infinite; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+    </style>
+</head>
+<body>
+    <div id="loading">
+        <div class="logo">🏪</div>
+        <h1>RetailFlow</h1>
+        <p>Point of Sale System</p>
+        <div class="spinner"></div>
+    </div>
+    <div id="root"></div>
+    <script type="text/babel" src="RetailPOS.jsx"></script>
+    <script type="text/babel">
+        document.getElementById('loading').style.display = 'none';
+        ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(RetailFlowPOS));
+    </script>
+    <script>
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('sw.js')
+                .then(reg => console.log('SW registered:', reg.scope))
+                .catch(err => console.log('SW registration skipped:', err));
+        }
+    </script>
+</body>
+</html>
