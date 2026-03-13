@@ -43,6 +43,8 @@ var useCallback = React.useCallback;
 // Leave empty to use demo/mock data mode
 const API_URL = "https://script.google.com/macros/s/AKfycbwZ3aTUSC89PVPmE4J47oaq8lXeJqdyfBQrvU4xC4Eko9Tn9SZ7dKiCauMotsNpENur_g/exec";
 const DEVICE_ID = "device_" + Math.random().toString(36).substr(2, 8);
+// For AI Snap feature - get your key from https://console.anthropic.com
+const ANTHROPIC_API_KEY = "";
 
 // ─── Audio Beep Utility ───────────────────────────────────────
 // Uses Web Audio API — no external files, works fully offline
@@ -694,7 +696,12 @@ function CameraScanModal({ products, onProductFound, onClose }) {
 
       const response = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": ANTHROPIC_API_KEY,
+          "anthropic-version": "2023-06-01",
+          "anthropic-dangerous-direct-browser-access": "true"
+        },
         body: JSON.stringify({
           model: "claude-sonnet-4-20250514",
           max_tokens: 1000,
@@ -1001,6 +1008,16 @@ Rules:
       });
 
       const data = await response.json();
+      // Check for API errors (auth, quota, etc.)
+      if (data.error) {
+        if (data.error.type === "authentication_error") {
+          setError("AI key not set. Add your Anthropic API key to the ANTHROPIC_API_KEY setting in the code.");
+        } else {
+          setError("AI error: " + (data.error.message || "Unknown error"));
+        }
+        setScanning(false);
+        return;
+      }
       const text = (data.content || []).map(c => c.text || "").join("").replace(/```json|```/g, "").trim();
       try {
         const parsed = JSON.parse(text);
