@@ -958,57 +958,133 @@ If confidence is low or you cannot identify: {"product_id": null, "product_name"
 
 
 function BarcodeScannerModal({ onScan, onClose }) {
-  const scannerRef = useRef(null);
-  const [scanning, setScanning] = useState(false);
-  const [error, setError] = useState(null);
-  const html5QrcodeRef = useRef(null);
+  // Use a unique ID per mount so stale instances from a previous open never collide
+  const uid = useRef("bcs_" + Math.random().toString(36).substr(2, 6));
+  const instanceRef = useRef(null);
+  const [status, setStatus] = useState("starting"); // "starting" | "scanning" | "error"
+  const [errorMsg, setErrorMsg] = useState("");
+
+  const stopScanner = useCallback(function() {
+    if (instanceRef.current) {
+      try { instanceRef.current.stop().catch(function(){}); } catch(e) {}
+      instanceRef.current = null;
+    }
+  }, []);
+
+  const startScanner = useCallback(function() {
+    setStatus("starting");
+    setErrorMsg("");
+
+    // Guard: Html5Qrcode library must be loaded
+    if (typeof Html5Qrcode === "undefined") {
+      setStatus("error");
+      setErrorMsg("Scanner library not loaded. Check your internet connection and reload the page.");
+      return;
+    }
+
+    // Guard: camera API must exist
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      setStatus("error");
+      setErrorMsg("Your browser does not support camera access. Use Chrome or Safari on a phone.");
+      return;
+    }
+
+    // Small delay so React has painted the div into the DOM
+    setTimeout(function() {
+      var el = document.getElementById(uid.current);
+      if (!el) {
+        setStatus("error");
+        setErrorMsg("Scanner element not found. Please close and try again.");
+        return;
+      }
+
+      try {
+        var scanner = new Html5Qrcode(uid.current);
+        instanceRef.current = scanner;
+
+        scanner.start(
+          { facingMode: "environment" },
+          { fps: 10, qrbox: { width: 260, height: 130 }, aspectRatio: 1.777 },
+          function(decodedText) {
+            stopScanner();
+            onScan(decodedText);
+          },
+          function() { /* per-frame misses — ignore */ }
+        ).then(function() {
+          setStatus("scanning");
+        }).catch(function(err) {
+          var msg = String(err || "");
+          if (msg.toLowerCase().includes("permission") || msg.toLowerCase().includes("denied")) {
+            setErrorMsg("Camera permission denied. Tap the camera icon in your browser address bar and allow access, then retry.");
+          } else if (msg.toLowerCase().includes("https") || msg.toLowerCase().includes("secure")) {
+            setErrorMsg("Camera requires a secure (HTTPS) connection. Make sure you're on https://");
+          } else if (msg.toLowerCase().includes("notfound") || msg.toLowerCase().includes("no camera")) {
+            setErrorMsg("No camera found on this device.");
+          } else {
+            setErrorMsg("Could not start camera: " + (msg || "unknown error") + ". Try closing other apps using the camera.");
+          }
+          setStatus("error");
+        });
+      } catch(e) {
+        setStatus("error");
+        setErrorMsg("Scanner failed to initialise: " + String(e.message || e));
+      }
+    }, 120);
+  }, [onScan, stopScanner]);
 
   useEffect(function() {
-    var scanner = null;
-    try {
-      scanner = new Html5Qrcode("barcode-reader");
-      html5QrcodeRef.current = scanner;
-      scanner.start(
-        { facingMode: "environment" },
-        { fps: 10, qrbox: { width: 280, height: 150 }, aspectRatio: 1.777 },
-        function(decodedText) {
-          scanner.stop().then(function() {
-            onScan(decodedText);
-          }).catch(function() { onScan(decodedText); });
-        },
-        function(err) { /* ignore scan errors */ }
-      ).then(function() {
-        setScanning(true);
-      }).catch(function(err) {
-        setError("Camera access denied or not available");
-      });
-    } catch(e) {
-      setError("Barcode scanner not supported");
-    }
-    return function() {
-      if (html5QrcodeRef.current) {
-        try { html5QrcodeRef.current.stop(); } catch(e) {}
-      }
-    };
+    startScanner();
+    return stopScanner;
   }, []);
 
   return (
-    <div className="fixed inset-0 bg-black/90 z-50 flex flex-col">
-      <div className="flex items-center justify-between p-4 bg-black">
+    <div className="fixed inset-0 bg-black z-50 flex flex-col">
+      {/* Header */}
+      <div className="flex items-center justify-between p-4 bg-zinc-950 border-b border-zinc-800">
         <div>
           <h3 className="text-sm font-bold text-white">Barcode Scanner</h3>
-          <p className="text-xs text-zinc-400">{scanning ? "Point at barcode" : "Starting camera..."}</p>
+          <p className="text-xs text-zinc-400">
+            {status === "scanning" ? "📷 Point camera at barcode" :
+             status === "error"    ? "⚠ Scanner error" :
+                                     "Starting camera..."}
+          </p>
         </div>
-        <button onClick={function() { if(html5QrcodeRef.current) { try{html5QrcodeRef.current.stop();}catch(e){} } onClose(); }}
-          className="w-10 h-10 rounded-full bg-zinc-800 flex items-center justify-center text-zinc-300">✕</button>
+        <button onClick={function() { stopScanner(); onClose(); }}
+          className="w-10 h-10 rounded-full bg-zinc-800 flex items-center justify-center text-zinc-300 text-lg">✕</button>
       </div>
-      <div className="flex-1 flex items-center justify-center bg-black">
-        <div id="barcode-reader" style={{width:"100%",maxWidth:"500px"}}></div>
+
+      {/* Camera viewport — the div Html5Qrcode renders into */}
+      <div className="flex-1 flex items-center justify-center bg-black overflow-hidden">
+        <div id={uid.current} style={{width:"100%", maxWidth:"500px"}} />
       </div>
-      {error && (
-        <div className="p-4 bg-red-500/10 border-t border-red-500/30 text-center">
-          <p className="text-sm text-red-400">{error}</p>
-          <button onClick={onClose} className="mt-2 px-4 py-2 bg-zinc-800 text-zinc-300 rounded-lg text-sm">Close</button>
+
+      {/* Status bar */}
+      {status === "starting" && (
+        <div className="p-4 bg-zinc-900 border-t border-zinc-800 flex items-center justify-center gap-3">
+          <div className="w-5 h-5 border-2 border-cyan-500 border-t-transparent rounded-full animate-spin" />
+          <p className="text-sm text-zinc-400">Requesting camera permission...</p>
+        </div>
+      )}
+
+      {status === "scanning" && (
+        <div className="p-4 bg-zinc-900 border-t border-zinc-800 text-center">
+          <p className="text-xs text-zinc-500">Hold steady — scanner will beep when it reads a barcode</p>
+        </div>
+      )}
+
+      {status === "error" && (
+        <div className="p-4 bg-red-950/60 border-t border-red-500/30 space-y-3">
+          <p className="text-sm text-red-300 text-center leading-relaxed">{errorMsg}</p>
+          <div className="flex gap-2">
+            <button onClick={function() { stopScanner(); startScanner(); }}
+              className="flex-1 py-2.5 rounded-xl bg-cyan-500/20 text-cyan-400 font-bold text-sm border border-cyan-500/30 active:scale-95 transition-all">
+              ↻ Retry
+            </button>
+            <button onClick={function() { stopScanner(); onClose(); }}
+              className="flex-1 py-2.5 rounded-xl bg-zinc-800 text-zinc-300 font-medium text-sm active:scale-95 transition-all">
+              Close
+            </button>
+          </div>
         </div>
       )}
     </div>
