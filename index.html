@@ -37,7 +37,7 @@ var useCallback = React.useCallback;
 
 
 // ═══════════════════════════════════════════════════════════════
-// RetailFlow POS — Configuration
+// RetailFlow POS - Configuration
 // ═══════════════════════════════════════════════════════════════
 // Set this to your deployed Apps Script Web App URL
 // Leave empty to use demo/mock data mode
@@ -45,7 +45,7 @@ const API_URL = "https://script.google.com/macros/s/AKfycbwZ3aTUSC89PVPmE4J47oaq
 const DEVICE_ID = "device_" + Math.random().toString(36).substr(2, 8);
 
 // ─── Audio Beep Utility ───────────────────────────────────────
-// Uses Web Audio API — no external files, works fully offline
+// Uses Web Audio API - no external files, works fully offline
 
 function playBeep(type) {
   try {
@@ -56,7 +56,7 @@ function playBeep(type) {
     gain.connect(ctx.destination);
 
     if (type === "success") {
-      // Short high-pitched double beep — product found / stock added
+      // Short high-pitched double beep - product found / stock added
       osc.type = "sine";
       osc.frequency.setValueAtTime(1320, ctx.currentTime);
       osc.frequency.setValueAtTime(1760, ctx.currentTime + 0.08);
@@ -65,7 +65,7 @@ function playBeep(type) {
       osc.start(ctx.currentTime);
       osc.stop(ctx.currentTime + 0.22);
     } else if (type === "error") {
-      // Low descending tone — not found
+      // Low descending tone - not found
       osc.type = "sawtooth";
       osc.frequency.setValueAtTime(400, ctx.currentTime);
       osc.frequency.exponentialRampToValueAtTime(200, ctx.currentTime + 0.3);
@@ -74,7 +74,7 @@ function playBeep(type) {
       osc.start(ctx.currentTime);
       osc.stop(ctx.currentTime + 0.3);
     } else if (type === "add") {
-      // Gentle rising tone — item added to cart / stock saved
+      // Gentle rising tone - item added to cart / stock saved
       osc.type = "sine";
       osc.frequency.setValueAtTime(880, ctx.currentTime);
       osc.frequency.setValueAtTime(1100, ctx.currentTime + 0.07);
@@ -285,7 +285,7 @@ function useProducts() {
           // also clear meta so we don't think we have a valid sync
           await dbDelete("meta", "lastProductSync");
         } else if (cached.length > 0) {
-          // Real user data in cache — load it immediately
+          // Real user data in cache - load it immediately
           setProducts(cached);
           setSource("cache");
           setLoading(false);
@@ -335,7 +335,7 @@ function useProducts() {
 // "variant"  → tap product, choose size/portion variant
 
 const MOCK_PRODUCTS = [];
-// Demo data removed — add your own products in the Stock tab
+// Demo data removed - add your own products in the Stock tab
 
 const TYPE_LABELS = {
   barcode: { label: "Scan", color: "bg-blue-500/15 text-blue-400 border-blue-500/25", icon: "📦" },
@@ -407,7 +407,7 @@ function WeightEntryModal({ product, onAdd, onClose }) {
             disabled={!parseFloat(weight)}
             className={`w-full py-4 rounded-xl font-bold text-lg transition-all active:scale-95 ${
               parseFloat(weight) > 0 ? "bg-gradient-to-r from-amber-500 to-orange-500 text-zinc-900 shadow-lg shadow-amber-500/20" : "bg-zinc-800 text-zinc-600 cursor-not-allowed"
-            }`}>Add to Cart — {parseFloat(weight) > 0 ? formatUGX(total) : "Enter weight"}</button>
+            }`}>Add to Cart - {parseFloat(weight) > 0 ? formatUGX(total) : "Enter weight"}</button>
         </div>
       </div>
     </div>
@@ -458,7 +458,7 @@ function PieceEntryModal({ product, onAdd, onClose }) {
           </div>
           <button onClick={() => onAdd(count, total)}
             className="w-full py-4 rounded-xl font-bold text-lg bg-gradient-to-r from-emerald-500 to-teal-500 text-zinc-900 shadow-lg shadow-emerald-500/20 active:scale-95 transition-all">
-            Add {count} pcs — {formatUGX(total)}</button>
+            Add {count} pcs - {formatUGX(total)}</button>
         </div>
       </div>
     </div>
@@ -518,7 +518,7 @@ function VariantModal({ product, onAdd, onClose }) {
             disabled={!selected}
             className={`w-full py-4 rounded-xl font-bold text-lg transition-all active:scale-95 ${
               selected ? "bg-gradient-to-r from-purple-500 to-violet-500 text-white shadow-lg shadow-purple-500/20" : "bg-zinc-800 text-zinc-600 cursor-not-allowed"
-            }`}>{selected ? `Add to Cart — ${formatUGX(total)}` : "Select a size"}</button>
+            }`}>{selected ? `Add to Cart - ${formatUGX(total)}` : "Select a size"}</button>
         </div>
       </div>
     </div>
@@ -647,7 +647,7 @@ function CameraScanModal({ products, onProductFound, onClose }) {
           setStream(mediaStream);
           setCameraReady(true);
         } else {
-          // Component unmounted before camera was ready — stop stream immediately
+          // Component unmounted before camera was ready - stop stream immediately
           mediaStream.getTracks().forEach(t => t.stop());
         }
       } catch (err) {
@@ -975,7 +975,7 @@ ${typeHint}
 
 Look at this image carefully and identify what item it is.
 
-Return ONLY this exact JSON — no extra text, no markdown:
+Return ONLY this exact JSON - no extra text, no markdown:
 {
   "name": "Sugar (Loose)",
   "category": "Grocery",
@@ -1197,7 +1197,7 @@ function BarcodeScannerModal({ onScan, onClose }) {
             stopScanner();
             onScan(decodedText);
           },
-          function() { /* per-frame misses — ignore */ }
+          function() { /* per-frame misses - ignore */ }
         ).then(function() {
           setStatus("scanning");
         }).catch(function(err) {
@@ -1241,7 +1241,7 @@ function BarcodeScannerModal({ onScan, onClose }) {
           className="w-10 h-10 rounded-full bg-zinc-800 flex items-center justify-center text-zinc-300 text-lg">✕</button>
       </div>
 
-      {/* Camera viewport — the div Html5Qrcode renders into */}
+      {/* Camera viewport - the div Html5Qrcode renders into */}
       <div className="flex-1 flex items-center justify-center bg-black overflow-hidden">
         <div id={uid.current} style={{width:"100%", maxWidth:"500px"}} />
       </div>
@@ -1256,7 +1256,7 @@ function BarcodeScannerModal({ onScan, onClose }) {
 
       {status === "scanning" && (
         <div className="p-4 bg-zinc-900 border-t border-zinc-800 text-center">
-          <p className="text-xs text-zinc-500">Hold steady — scanner will beep when it reads a barcode</p>
+          <p className="text-xs text-zinc-500">Hold steady - scanner will beep when it reads a barcode</p>
         </div>
       )}
 
@@ -1332,7 +1332,7 @@ function POSScreen({ products, cart, setCart, onComplete }) {
     setCart(prev => {
       const exists = prev.find(c => c.cartKey === key);
       if (exists) { const newQty = exists.qty + qty; return prev.map(c => c.cartKey === key ? { ...c, qty: newQty, lineTotal: newQty * c.unitPrice } : c); }
-      return [...prev, { cartKey: key, id: product.id, name: `${product.name} — ${variant.label}`, image: product.image, qty, unitPrice: variant.price, lineTotal: total, unit: variant.unit, type: "variant", cost: product.cost }];
+      return [...prev, { cartKey: key, id: product.id, name: `${product.name} - ${variant.label}`, image: product.image, qty, unitPrice: variant.price, lineTotal: total, unit: variant.unit, type: "variant", cost: product.cost }];
     });
     setVariantModal(null);
   };
@@ -1518,7 +1518,7 @@ function POSScreen({ products, cart, setCart, onComplete }) {
         </div>
       )}
 
-      {showBarcodeScanner && <BarcodeScannerModal onScan={function(code) { setShowBarcodeScanner(false); setBarcodeInput(code); var found = products.find(function(p){return p.barcode && p.barcode === code;}); if(found){ playBeep("success"); handleProductTap(found); } else { playBeep("error"); setNotFoundMsg("Scanned: " + code + " — not found. Add it in Stock tab."); setTimeout(function(){ setNotFoundMsg(""); }, 4000); } }} onClose={function(){setShowBarcodeScanner(false);}} />}
+      {showBarcodeScanner && <BarcodeScannerModal onScan={function(code) { setShowBarcodeScanner(false); setBarcodeInput(code); var found = products.find(function(p){return p.barcode && p.barcode === code;}); if(found){ playBeep("success"); handleProductTap(found); } else { playBeep("error"); setNotFoundMsg("Scanned: " + code + " - not found. Add it in Stock tab."); setTimeout(function(){ setNotFoundMsg(""); }, 4000); } }} onClose={function(){setShowBarcodeScanner(false);}} />}
       {weightModal && <WeightEntryModal product={weightModal} onAdd={(w, t) => addWeightProduct(weightModal, w, t)} onClose={() => setWeightModal(null)} />}
       {pieceModal && <PieceEntryModal product={pieceModal} onAdd={(c, t) => addPieceProduct(pieceModal, c, t)} onClose={() => setPieceModal(null)} />}
       {variantModal && <VariantModal product={variantModal} onAdd={(vi, q, t) => addVariantProduct(variantModal, vi, q, t)} onClose={() => setVariantModal(null)} />}
@@ -1626,7 +1626,7 @@ function InventoryScreen({ products, setProducts }) {
         <div className="mx-4 mb-2 bg-zinc-800/80 border border-amber-500/30 rounded-xl p-4 space-y-3">
           <div className="flex items-center justify-between">
             <h3 className="text-sm font-bold text-amber-400">Add New Product</h3>
-            {/* AI Snap button — visible for all types, especially useful for weight/piece */}
+            {/* AI Snap button - visible for all types, especially useful for weight/piece */}
             <button onClick={() => setShowAISnap(true)}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gradient-to-r from-violet-500/20 to-purple-500/20 border border-violet-500/40 text-violet-300 text-xs font-bold active:scale-95 transition-all hover:from-violet-500/30">
               <svg width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z"/><circle cx="12" cy="13" r="4"/></svg>
@@ -1733,7 +1733,7 @@ function InventoryScreen({ products, setProducts }) {
           </div>
         )}
 
-      {/* ✅ Proper barcode scanner modal — same component as POS, works on all phones */}
+      {/* ✅ Proper barcode scanner modal - same component as POS, works on all phones */}
       {showInvScanner && (
         <BarcodeScannerModal
           onScan={function(code) {
@@ -1745,7 +1745,7 @@ function InventoryScreen({ products, setProducts }) {
         />
       )}
 
-      {/* ✅ AI Snap modal — identifies new product and fills the form */}
+      {/* ✅ AI Snap modal - identifies new product and fills the form */}
       {showAISnap && (
         <AISnapModal
           productType={np.type}
@@ -1754,8 +1754,8 @@ function InventoryScreen({ products, setProducts }) {
             playBeep("success");
             // Build a human-readable estimate note to show in the form
             let estimateNote = "";
-            if (aiResult.estimated_weight_kg) estimateNote = `AI estimated ~${aiResult.estimated_weight_kg} kg — update Stock Qty`;
-            else if (aiResult.estimated_pieces) estimateNote = `AI estimated ~${aiResult.estimated_pieces} pieces — update Stock Qty`;
+            if (aiResult.estimated_weight_kg) estimateNote = `AI estimated ~${aiResult.estimated_weight_kg} kg - update Stock Qty`;
+            else if (aiResult.estimated_pieces) estimateNote = `AI estimated ~${aiResult.estimated_pieces} pieces - update Stock Qty`;
 
             setNp(function(prev) {
               const updated = {
@@ -1798,7 +1798,7 @@ function HistoryScreen({ sales }) {
           <div className="flex gap-4 mt-3">
             <div><p className="text-xs text-zinc-500">Transactions</p><p className="text-lg font-bold text-zinc-200">{sales.length}</p></div>
             <div><p className="text-xs text-zinc-500">Gross Profit</p><p className="text-lg font-bold text-emerald-400">{formatUGX(todayProfit)}</p></div>
-            <div><p className="text-xs text-zinc-500">Avg. Sale</p><p className="text-lg font-bold text-zinc-200">{sales.length > 0 ? formatUGX(Math.round(todayTotal / sales.length)) : "—"}</p></div>
+            <div><p className="text-xs text-zinc-500">Avg. Sale</p><p className="text-lg font-bold text-zinc-200">{sales.length > 0 ? formatUGX(Math.round(todayTotal / sales.length)) : "-"}</p></div>
           </div>
         </div>
       </div>
@@ -2037,7 +2037,7 @@ function RetailFlowPOS() {
               source === "empty" ? "bg-zinc-700 text-zinc-500" :
                                    "bg-zinc-700 text-zinc-400"
             }`}>
-              {source === "api" ? "Live" : source === "cache" ? "Cached" : source === "empty" ? "No API" : "—"}
+              {source === "api" ? "Live" : source === "cache" ? "Cached" : source === "empty" ? "No API" : "-"}
             </span>
           </button>
 
@@ -2054,7 +2054,7 @@ function RetailFlowPOS() {
       {!online && (
         <div className="bg-amber-500/10 border-b border-amber-500/20 px-4 py-2 flex items-center gap-2">
           <span className="text-amber-400 text-sm">⚡</span>
-          <p className="text-xs text-amber-300 flex-1">You're offline — sales are saved locally and will sync when internet returns</p>
+          <p className="text-xs text-amber-300 flex-1">You're offline - sales are saved locally and will sync when internet returns</p>
           {pendingCount > 0 && <span className="text-xs font-bold text-amber-400">{pendingCount} pending</span>}
         </div>
       )}
@@ -2067,7 +2067,7 @@ function RetailFlowPOS() {
           <div>
             <label className="text-xs text-zinc-500 block mb-1">API URL (Apps Script Web App)</label>
             <div className="bg-zinc-800 rounded-lg p-2 text-xs text-zinc-400 font-mono break-all">
-              {API_URL || "Not configured — using demo mode"}
+              {API_URL || "Not configured - using demo mode"}
             </div>
             <p className="text-xs text-zinc-600 mt-1">Set API_URL in the code to connect to your Google Sheet</p>
           </div>
