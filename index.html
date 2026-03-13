@@ -274,23 +274,30 @@ function useProducts() {
     const load = async () => {
       setLoading(true);
 
-      // 1. Try loading from IndexedDB cache first (instant)
+      // Wipe any old demo/mock data that was cached in IndexedDB from previous versions
       try {
         const cached = await dbGetAll("products");
-        if (cached.length > 0) {
+        const isDemoData = cached.length > 0 && cached.some(p =>
+          ["P001","P002","P003","W001","W002","PC01","V001","V002"].includes(p.id)
+        );
+        if (isDemoData) {
+          await dbClear("products");
+          // also clear meta so we don't think we have a valid sync
+          await dbDelete("meta", "lastProductSync");
+        } else if (cached.length > 0) {
+          // Real user data in cache — load it immediately
           setProducts(cached);
           setSource("cache");
           setLoading(false);
         }
       } catch (e) { /* continue */ }
 
-      // 2. Try fetching from API (background refresh)
+      // Try fetching from API (background refresh)
       if (api.isConfigured()) {
         const result = await api.get("getProducts");
         if (result && result.success && result.products) {
           setProducts(result.products);
           setSource("api");
-          // Cache products for offline
           await dbClear("products");
           await dbPut("products", result.products);
           await dbPut("meta", { key: "lastProductSync", value: new Date().toISOString() });
@@ -299,11 +306,9 @@ function useProducts() {
         }
       }
 
-      // 3. Fallback to demo data if nothing else worked
-      if (products.length === 0) {
-        setProducts(MOCK_PRODUCTS);
-        setSource("demo");
-      }
+      // No API, no real cached data → start with empty inventory
+      setProducts([]);
+      setSource("empty");
       setLoading(false);
     };
     load();
@@ -329,66 +334,8 @@ function useProducts() {
 // "piece"    → tap product, enter count (pieces)
 // "variant"  → tap product, choose size/portion variant
 
-const MOCK_PRODUCTS = [
-  // BARCODED PRODUCTS (factory goods with barcodes)
-  { id: "P001", type: "barcode", barcode: "8901234567890", name: "Coca Cola 500ml", category: "Beverages", price: 2500, cost: 1800, stock: 48, unit: "bottle", image: "🥤" },
-  { id: "P002", type: "barcode", barcode: "8901234567891", name: "Bread - White Loaf", category: "Bakery", price: 5000, cost: 3500, stock: 24, unit: "loaf", image: "🍞" },
-  { id: "P003", type: "barcode", barcode: "8901234567892", name: "Omo Detergent 1kg", category: "Household", price: 8000, cost: 6200, stock: 15, unit: "pack", image: "🧴" },
-  { id: "P004", type: "barcode", barcode: "8901234567893", name: "Colgate Toothpaste", category: "Personal Care", price: 4000, cost: 2800, stock: 35, unit: "tube", image: "🪥" },
-  { id: "P005", type: "barcode", barcode: "8901234567894", name: "Cowboy Biscuits", category: "Snacks", price: 500, cost: 350, stock: 60, unit: "pack", image: "🍪" },
-  { id: "P006", type: "barcode", barcode: "8901234567895", name: "Mukwano Soap Bar", category: "Household", price: 3500, cost: 2500, stock: 40, unit: "bar", image: "🧼" },
-  { id: "P007", type: "barcode", barcode: "8901234567896", name: "Nile Special 500ml", category: "Beverages", price: 4000, cost: 3000, stock: 30, unit: "bottle", image: "🍺" },
-  { id: "P008", type: "barcode", barcode: "8901234567897", name: "Fresh Milk 500ml", category: "Dairy", price: 3000, cost: 2200, stock: 40, unit: "pack", image: "🥛" },
-
-  // WEIGHT-BASED PRODUCTS (sold by kg - weighed at counter)
-  { id: "W001", type: "weight", barcode: "", name: "Sugar (Loose)", category: "Grocery", pricePerKg: 5000, cost: 3800, stock: 100, unit: "kg", image: "🍚", minWeight: 0.25, weightStep: 0.25 },
-  { id: "W002", type: "weight", barcode: "", name: "Rice (Loose)", category: "Grocery", pricePerKg: 5500, cost: 4200, stock: 150, unit: "kg", image: "🌾", minWeight: 0.5, weightStep: 0.5 },
-  { id: "W003", type: "weight", barcode: "", name: "Irish Potatoes", category: "Fresh Produce", pricePerKg: 3000, cost: 2000, stock: 200, unit: "kg", image: "🥔", minWeight: 0.5, weightStep: 0.5 },
-  { id: "W004", type: "weight", barcode: "", name: "Beans (Loose)", category: "Grocery", pricePerKg: 6000, cost: 4500, stock: 80, unit: "kg", image: "🫘", minWeight: 0.25, weightStep: 0.25 },
-  { id: "W005", type: "weight", barcode: "", name: "Maize Flour (Posho)", category: "Grocery", pricePerKg: 3500, cost: 2500, stock: 120, unit: "kg", image: "🌽", minWeight: 0.5, weightStep: 0.5 },
-  { id: "W006", type: "weight", barcode: "", name: "Groundnuts", category: "Grocery", pricePerKg: 10000, cost: 7500, stock: 40, unit: "kg", image: "🥜", minWeight: 0.25, weightStep: 0.25 },
-  { id: "W007", type: "weight", barcode: "", name: "Onions", category: "Fresh Produce", pricePerKg: 4000, cost: 2800, stock: 60, unit: "kg", image: "🧅", minWeight: 0.25, weightStep: 0.25 },
-  { id: "W008", type: "weight", barcode: "", name: "Tomatoes", category: "Fresh Produce", pricePerKg: 5000, cost: 3500, stock: 50, unit: "kg", image: "🍅", minWeight: 0.25, weightStep: 0.25 },
-
-  // PIECE-BASED PRODUCTS (sold per piece, no barcode)
-  { id: "PC01", type: "piece", barcode: "", name: "Eggs (per piece)", category: "Dairy", pricePerPiece: 500, cost: 350, stock: 300, unit: "pcs", image: "🥚" },
-  { id: "PC02", type: "piece", barcode: "", name: "Rolex Chapati", category: "Ready Food", pricePerPiece: 3000, cost: 2000, stock: 20, unit: "pcs", image: "🌯" },
-  { id: "PC03", type: "piece", barcode: "", name: "Mandazi", category: "Bakery", pricePerPiece: 200, cost: 100, stock: 100, unit: "pcs", image: "🍩" },
-  { id: "PC04", type: "piece", barcode: "", name: "Samosa", category: "Ready Food", pricePerPiece: 1000, cost: 600, stock: 50, unit: "pcs", image: "🔺" },
-  { id: "PC05", type: "piece", barcode: "", name: "Chapati", category: "Bakery", pricePerPiece: 1000, cost: 600, stock: 40, unit: "pcs", image: "🫓" },
-  { id: "PC06", type: "piece", barcode: "", name: "Banana (cooking)", category: "Fresh Produce", pricePerPiece: 300, cost: 150, stock: 80, unit: "pcs", image: "🍌" },
-
-  // VARIANT PRODUCTS (big package with barcode, sold in smaller portions)
-  { id: "V001", type: "variant", barcode: "8901234567900", name: "Blue Band", category: "Dairy", image: "🧈", cost: 1500,
-    variants: [
-      { label: "Small (100g)", price: 2000, stock: 30, unit: "pc" },
-      { label: "Medium (250g)", price: 4500, stock: 20, unit: "pc" },
-      { label: "Large (500g)", price: 8000, stock: 15, unit: "pc" },
-    ]
-  },
-  { id: "V002", type: "variant", barcode: "", name: "Cooking Oil", category: "Grocery", image: "🫗", cost: 800,
-    variants: [
-      { label: "Small (250ml)", price: 3000, stock: 25, unit: "pc" },
-      { label: "Medium (500ml)", price: 5500, stock: 18, unit: "pc" },
-      { label: "Large (1L)", price: 10000, stock: 12, unit: "pc" },
-      { label: "Jerrycan (5L)", price: 45000, stock: 5, unit: "pc" },
-    ]
-  },
-  { id: "V003", type: "variant", barcode: "", name: "Washing Powder", category: "Household", image: "🧹", cost: 300,
-    variants: [
-      { label: "Small sachet", price: 500, stock: 80, unit: "pc" },
-      { label: "Medium (500g)", price: 4000, stock: 25, unit: "pc" },
-      { label: "Large (1kg)", price: 7500, stock: 10, unit: "pc" },
-    ]
-  },
-  { id: "V004", type: "variant", barcode: "", name: "Royco Seasoning", category: "Spices", image: "🧂", cost: 100,
-    variants: [
-      { label: "Single cube", price: 200, stock: 200, unit: "pc" },
-      { label: "Strip (10 cubes)", price: 1800, stock: 40, unit: "strip" },
-      { label: "Box (24 cubes)", price: 4000, stock: 15, unit: "box" },
-    ]
-  },
-];
+const MOCK_PRODUCTS = [];
+// Demo data removed — add your own products in the Stock tab
 
 const TYPE_LABELS = {
   barcode: { label: "Scan", color: "bg-blue-500/15 text-blue-400 border-blue-500/25", icon: "📦" },
@@ -1519,7 +1466,20 @@ function POSScreen({ products, cart, setCart, onComplete }) {
           })}
         </div>
         {filtered.length === 0 && (
-          <div className="text-center py-12"><span className="text-4xl mb-3 block">🔍</span><p className="text-zinc-500">No products found</p></div>
+          <div className="text-center py-12 px-6">
+            {products.length === 0 ? (
+              <>
+                <span className="text-5xl mb-4 block">🏪</span>
+                <p className="text-zinc-300 font-semibold text-base">No products yet</p>
+                <p className="text-zinc-500 text-sm mt-2 leading-relaxed">Go to the <span className="text-amber-400 font-bold">Stock</span> tab and tap <span className="text-amber-400 font-bold">+ Add</span> to start building your inventory</p>
+              </>
+            ) : (
+              <>
+                <span className="text-4xl mb-3 block">🔍</span>
+                <p className="text-zinc-500">No products match your search</p>
+              </>
+            )}
+          </div>
         )}
       </div>
 
@@ -1592,32 +1552,29 @@ function InventoryScreen({ products, setProducts }) {
   const handleStockSave = (id) => {
     const val = parseInt(editValue);
     if (!isNaN(val) && val >= 0 && setProducts) {
-      playBeep("add"); // 🔔 beep: stock updated
-      setProducts(prev => prev.map(p => {
-        if (p.id !== id) return p;
-        // FIX: variant products store stock inside each variant, not at top level
-        if (p.type === "variant") {
-          // Distribute new total evenly across variants (or just update first variant
-          // if editing from the summary row). Show total across all variants.
-          const perVariant = Math.floor(val / p.variants.length);
-          const remainder = val % p.variants.length;
-          return {
-            ...p,
-            variants: p.variants.map((v, i) => ({
-              ...v,
-              stock: perVariant + (i === 0 ? remainder : 0)
-            }))
-          };
-        }
-        return { ...p, stock: val };
-      }));
+      playBeep("add");
+      setProducts(prev => {
+        const updated = prev.map(p => {
+          if (p.id !== id) return p;
+          if (p.type === "variant") {
+            const perVariant = Math.floor(val / p.variants.length);
+            const remainder = val % p.variants.length;
+            return { ...p, variants: p.variants.map((v, i) => ({ ...v, stock: perVariant + (i === 0 ? remainder : 0) }) ) };
+          }
+          return { ...p, stock: val };
+        });
+        // Persist the changed product to IndexedDB
+        const changed = updated.find(p => p.id === id);
+        if (changed) dbPut("products", changed).catch(() => {});
+        return updated;
+      });
     }
     setEditingId(null); setEditValue("");
   };
 
   const handleAddProduct = () => {
     if (!np.name.trim() || !setProducts) return;
-    playBeep("success"); // 🔔 beep: new product saved
+    playBeep("success");
     const prefix = np.type === "weight" ? "W" : np.type === "piece" ? "PC" : "P";
     const newP = {
       id: prefix + String(Date.now()).slice(-4), type: np.type, barcode: np.barcode || "",
@@ -1628,7 +1585,12 @@ function InventoryScreen({ products, setProducts }) {
     if (np.type === "barcode") newP.price = Number(np.price) || 0;
     if (np.type === "weight") { newP.pricePerKg = Number(np.pricePerKg) || 0; newP.minWeight = 0.25; newP.weightStep = 0.25; }
     if (np.type === "piece") newP.pricePerPiece = Number(np.pricePerPiece) || 0;
-    setProducts(prev => [...prev, newP]);
+    setProducts(prev => {
+      const updated = [...prev, newP];
+      // Persist to IndexedDB so products survive page reload
+      dbPut("products", newP).catch(() => {});
+      return updated;
+    });
     setNp({name:"",type:"barcode",category:"General",price:"",cost:"",stock:"",barcode:"",unit:"pc",image:"📦",pricePerKg:"",pricePerPiece:""});
     setShowAddForm(false);
   };
@@ -1755,7 +1717,21 @@ function InventoryScreen({ products, setProducts }) {
             </div>
           );
         })}
-      </div>
+
+        {filtered.length === 0 && (
+          <div className="text-center py-16 px-6">
+            {products.length === 0 ? (
+              <>
+                <span className="text-5xl mb-4 block">📦</span>
+                <p className="text-zinc-300 font-semibold text-base">Inventory is empty</p>
+                <p className="text-zinc-500 text-sm mt-2 leading-relaxed">Tap <span className="text-amber-400 font-bold">+ Add</span> above to add your first product</p>
+                <p className="text-zinc-600 text-xs mt-3">Use <span className="text-violet-400">🤖 AI Snap</span> to identify products with your camera</p>
+              </>
+            ) : (
+              <><span className="text-4xl mb-3 block">🔍</span><p className="text-zinc-500">No products match your filter</p></>
+            )}
+          </div>
+        )}
 
       {/* ✅ Proper barcode scanner modal — same component as POS, works on all phones */}
       {showInvScanner && (
@@ -2056,11 +2032,12 @@ function RetailFlowPOS() {
 
             {/* Data source badge */}
             <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${
-              source === "api" ? "bg-emerald-500/15 text-emerald-400" :
+              source === "api"   ? "bg-emerald-500/15 text-emerald-400" :
               source === "cache" ? "bg-blue-500/15 text-blue-400" :
-              "bg-zinc-700 text-zinc-400"
+              source === "empty" ? "bg-zinc-700 text-zinc-500" :
+                                   "bg-zinc-700 text-zinc-400"
             }`}>
-              {source === "api" ? "Live" : source === "cache" ? "Cached" : "Demo"}
+              {source === "api" ? "Live" : source === "cache" ? "Cached" : source === "empty" ? "No API" : "—"}
             </span>
           </button>
 
