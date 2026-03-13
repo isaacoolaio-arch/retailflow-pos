@@ -161,10 +161,13 @@ const api = {
     url.searchParams.set("action", action);
     Object.keys(params).forEach(k => url.searchParams.set(k, params[k]));
     try {
-      const res = await fetch(url.toString(), { redirect: "follow" });
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 8000);
+      const res = await fetch(url.toString(), { redirect: "follow", signal: controller.signal });
+      clearTimeout(timer);
       return await res.json();
     } catch (e) {
-      console.warn("API GET failed:", e);
+      console.warn("API GET failed:", e.name === "AbortError" ? "Timeout after 8s" : e);
       return null;
     }
   },
@@ -172,15 +175,19 @@ const api = {
   async post(action, data = {}) {
     if (!API_URL) return null;
     try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 10000);
       const res = await fetch(API_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action, ...data, deviceId: DEVICE_ID }),
-        redirect: "follow"
+        redirect: "follow",
+        signal: controller.signal
       });
+      clearTimeout(timer);
       return await res.json();
     } catch (e) {
-      console.warn("API POST failed:", e);
+      console.warn("API POST failed:", e.name === "AbortError" ? "Timeout after 10s" : e);
       return null;
     }
   }
@@ -306,12 +313,19 @@ function useProducts() {
         }
       }
 
-      // No API, no real cached data → start with empty inventory
+      // No API, no real cached data - start with empty inventory
       setProducts([]);
       setSource("empty");
       setLoading(false);
     };
-    load();
+
+    // Safety net: if load() hangs for any reason, force-complete after 12s
+    const safetyTimer = setTimeout(() => {
+      setLoading(false);
+      setSource(prev => prev === "loading" ? "empty" : prev);
+    }, 12000);
+
+    load().finally(() => clearTimeout(safetyTimer));
   }, []);
 
   const refreshProducts = async () => {
