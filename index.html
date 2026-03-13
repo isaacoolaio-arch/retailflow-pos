@@ -1257,6 +1257,7 @@ function InventoryScreen({ products, setProducts }) {
   const [editingId, setEditingId] = useState(null);
   const [editValue, setEditValue] = useState("");
   const [showAddForm, setShowAddForm] = useState(false);
+  const [showInvScanner, setShowInvScanner] = useState(false); // ✅ proper modal state
   const [np, setNp] = useState({name:"",type:"barcode",category:"General",price:"",cost:"",stock:"",barcode:"",unit:"pc",image:"📦",pricePerKg:"",pricePerPiece:""});
 
   const getStock = (p) => p.type === "variant" ? p.variants.reduce((s, v) => s + v.stock, 0) : (p.stock || 0);
@@ -1357,23 +1358,8 @@ function InventoryScreen({ products, setProducts }) {
             <input type="number" value={np.stock} onChange={e => setNp({...np, stock: e.target.value})} placeholder="Stock Qty" className="bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none" />
             <div className="col-span-2 flex gap-2">
               <input type="text" value={np.barcode} onChange={e => setNp({...np, barcode: e.target.value})} placeholder="Barcode number" className="flex-1 bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none" />
-              <button type="button" onClick={function(){
-                try {
-                  // FIX: append the div to DOM BEFORE creating Html5Qrcode instance
-                  var div = document.createElement("div"); div.id = "inv-barcode-reader"; div.style.cssText = "position:fixed;inset:0;z-index:9999;background:black;";
-                  var closeBtn = document.createElement("button"); closeBtn.textContent = "✕ Close"; closeBtn.style.cssText = "position:fixed;top:16px;right:16px;z-index:10000;background:#333;color:white;border:none;padding:8px 16px;border-radius:8px;font-size:16px;cursor:pointer;";
-                  document.body.appendChild(div); document.body.appendChild(closeBtn);
-                  try {
-                    var sc = new Html5Qrcode("inv-barcode-reader");
-                    closeBtn.onclick = function(){ try{sc.stop();}catch(e){} if(document.body.contains(div))document.body.removeChild(div); if(document.body.contains(closeBtn))document.body.removeChild(closeBtn); };
-                    sc.start({facingMode:"environment"},{fps:10,qrbox:{width:280,height:150}},function(code){
-                      try{sc.stop();}catch(e){} if(document.body.contains(div))document.body.removeChild(div); if(document.body.contains(closeBtn))document.body.removeChild(closeBtn);
-                      playBeep("success"); // 🔔 beep: barcode scanned for new product
-                      setNp(function(prev){return Object.assign({},prev,{barcode:code});});
-                    },function(){}).catch(function(){ if(document.body.contains(div))document.body.removeChild(div); if(document.body.contains(closeBtn))document.body.removeChild(closeBtn); alert("Camera error"); });
-                  } catch(e){ if(document.body.contains(div))document.body.removeChild(div); if(document.body.contains(closeBtn))document.body.removeChild(closeBtn); alert("Scanner not available"); }
-                }catch(e){alert("Scanner not available");}
-              }} className="px-3 bg-cyan-500 text-white rounded-lg font-bold text-sm active:scale-95 flex items-center gap-1">
+              <button type="button" onClick={() => setShowInvScanner(true)}
+                className="px-3 bg-cyan-500 text-white rounded-lg font-bold text-sm active:scale-95 flex items-center gap-1">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 7V5a2 2 0 012-2h2M17 3h2a2 2 0 012 2v2M21 17v2a2 2 0 01-2 2h-2M7 21H5a2 2 0 01-2-2v-2"/><line x1="7" y1="12" x2="17" y2="12"/></svg>
                 Scan
               </button>
@@ -1434,6 +1420,18 @@ function InventoryScreen({ products, setProducts }) {
           );
         })}
       </div>
+
+      {/* ✅ Proper barcode scanner modal — same component as POS, works on all phones */}
+      {showInvScanner && (
+        <BarcodeScannerModal
+          onScan={function(code) {
+            setShowInvScanner(false);
+            playBeep("success");
+            setNp(function(prev) { return Object.assign({}, prev, { barcode: code }); });
+          }}
+          onClose={function() { setShowInvScanner(false); }}
+        />
+      )}
     </div>
   );
 }
