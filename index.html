@@ -1576,7 +1576,7 @@ function InventoryScreen({ products, setProducts }) {
   const [showAddForm, setShowAddForm] = useState(false);
   const [showInvScanner, setShowInvScanner] = useState(false); // ✅ proper modal state
   const [showAISnap, setShowAISnap] = useState(false); // ✅ AI snap for add form
-  const [np, setNp] = useState({name:"",type:"barcode",category:"General",price:"",cost:"",stock:"",barcode:"",unit:"pc",image:"📦",pricePerKg:"",pricePerPiece:""});
+  const [np, setNp] = useState({name:"",type:"barcode",category:"General",price:"",cost:"",stock:"",barcode:"",unit:"pc",image:"📦",pricePerKg:"",pricePerPiece:"",qtyPacks:"",qtyPerPack:""});
 
   const getStock = (p) => p.type === "variant" ? p.variants.reduce((s, v) => s + v.stock, 0) : (p.stock || 0);
   const getPrice = (p) => p.type === "weight" ? p.pricePerKg : p.type === "piece" ? p.pricePerPiece : p.type === "variant" ? (p.variants && p.variants[0] ? p.variants[0].price : 0) : p.price;
@@ -1633,7 +1633,7 @@ function InventoryScreen({ products, setProducts }) {
     dbPut("products", newP).catch(() => {});
     // Then sync to Google Sheet in background
     api.post("addProduct", newP).catch(() => {});
-    setNp({name:"",type:"barcode",category:"General",price:"",cost:"",stock:"",barcode:"",unit:"pc",image:"📦",pricePerKg:"",pricePerPiece:""});
+    setNp({name:"",type:"barcode",category:"General",price:"",cost:"",stock:"",barcode:"",unit:"pc",image:"📦",pricePerKg:"",pricePerPiece:"",qtyPacks:"",qtyPerPack:""});
     setShowAddForm(false);
   };
 
@@ -1721,7 +1721,48 @@ function InventoryScreen({ products, setProducts }) {
                 {np.type === "weight" && <input type="number" value={np.pricePerKg} onChange={e => setNp({...np, pricePerKg: e.target.value})} placeholder="Price/Kg (UGX)" className="bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2.5 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none" />}
                 {np.type === "piece" && <input type="number" value={np.pricePerPiece} onChange={e => setNp({...np, pricePerPiece: e.target.value})} placeholder="Price/Piece (UGX)" className="bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2.5 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none" />}
                 <input type="number" value={np.cost} onChange={e => setNp({...np, cost: e.target.value})} placeholder="Cost Price" className="bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2.5 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none" />
-                <input type="number" value={np.stock} onChange={e => setNp({...np, stock: e.target.value})} placeholder="Stock Qty" className="bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2.5 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none" />
+                <div className="col-span-2 bg-zinc-800/80 border border-zinc-700 rounded-xl p-3 space-y-2">
+                  <p className="text-xs font-semibold text-zinc-400">Stock Quantity</p>
+                  {/* Simple entry */}
+                  <div className="flex items-center gap-2">
+                    <input type="number" value={np.stock} onChange={e => setNp({...np, stock: e.target.value, qtyPacks:"", qtyPerPack:""})}
+                      placeholder="Total qty (e.g. 240)" className="flex-1 bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-amber-500" />
+                    <span className="text-xs text-zinc-500 whitespace-nowrap">{np.unit || "units"}</span>
+                  </div>
+                  {/* OR carton/pack calculator */}
+                  <p className="text-xs text-zinc-600 text-center">— or calculate from packs —</p>
+                  <div className="flex items-center gap-2">
+                    <div className="flex-1">
+                      <p className="text-xs text-zinc-600 mb-1">How many packs/boxes?</p>
+                      <input type="number" value={np.qtyPacks||""} onChange={e => {
+                        const packs = e.target.value;
+                        const perPack = np.qtyPerPack || "";
+                        const total = packs && perPack ? String(Number(packs) * Number(perPack)) : "";
+                        setNp({...np, qtyPacks: packs, stock: total});
+                      }} placeholder="e.g. 10" className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-cyan-500" />
+                    </div>
+                    <span className="text-zinc-600 text-lg mt-4">×</span>
+                    <div className="flex-1">
+                      <p className="text-xs text-zinc-600 mb-1">Units per pack?</p>
+                      <input type="number" value={np.qtyPerPack||""} onChange={e => {
+                        const perPack = e.target.value;
+                        const packs = np.qtyPacks || "";
+                        const total = packs && perPack ? String(Number(packs) * Number(perPack)) : "";
+                        setNp({...np, qtyPerPack: perPack, stock: total});
+                      }} placeholder="e.g. 24" className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-cyan-500" />
+                    </div>
+                    <span className="text-zinc-600 text-lg mt-4">=</span>
+                    <div className="flex-1">
+                      <p className="text-xs text-zinc-600 mb-1">Total</p>
+                      <div className={`w-full rounded-lg px-3 py-2 text-sm font-bold text-center border ${np.stock && np.qtyPacks && np.qtyPerPack ? "bg-amber-500/10 border-amber-500/40 text-amber-400" : "bg-zinc-900 border-zinc-700 text-zinc-600"}`}>
+                        {np.stock || "0"} {np.unit || ""}
+                      </div>
+                    </div>
+                  </div>
+                  {np.qtyPacks && np.qtyPerPack && np.stock && (
+                    <p className="text-xs text-cyan-400 text-center">✓ {np.qtyPacks} packs × {np.qtyPerPack} {np.unit || "units"} = <strong>{np.stock} {np.unit || "units"}</strong> total in stock</p>
+                  )}
+                </div>
                 <div className="col-span-2">
                   <p className="text-xs text-zinc-500 mb-1.5">Unit of measurement</p>
                   <div className="flex flex-wrap gap-1.5">
