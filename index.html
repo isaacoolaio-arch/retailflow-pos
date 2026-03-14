@@ -44,7 +44,7 @@ var useCallback = React.useCallback;
 const API_URL = "https://script.google.com/macros/s/AKfycbwZ3aTUSC89PVPmE4J47oaq8lXeJqdyfBQrvU4xC4Eko9Tn9SZ7dKiCauMotsNpENur_g/exec";
 const DEVICE_ID = "device_" + Math.random().toString(36).substr(2, 8);
 // For AI Snap feature - get your key from https://console.anthropic.com
-const ANTHROPIC_API_KEY = "";
+const ANTHROPIC_API_KEY = ""; // DO NOT put key here - app will ask you to enter it safely
 
 // ─── Audio Beep Utility ───────────────────────────────────────
 // Uses Web Audio API — no external files, works fully offline
@@ -698,7 +698,7 @@ function CameraScanModal({ products, onProductFound, onClose }) {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "x-api-key": ANTHROPIC_API_KEY,
+          "x-api-key": (localStorage.getItem("anthropic_key") || ""),
           "anthropic-version": "2023-06-01",
           "anthropic-dangerous-direct-browser-access": "true"
         },
@@ -950,6 +950,13 @@ function AISnapModal({ productType, onFill, onClose }) {
   };
 
   const snapAndIdentify = async () => {
+    // Check for API key - prompt user if not saved yet
+    let apiKey = localStorage.getItem("anthropic_key");
+    if (!apiKey) {
+      apiKey = window.prompt("Enter your Anthropic API key to use AI Snap:\n(starts with sk-ant-...)\n\nYour key is saved only on this device, never uploaded anywhere.");
+      if (!apiKey || !apiKey.trim()) return;
+      localStorage.setItem("anthropic_key", apiKey.trim());
+    }
     if (!videoRef.current || !canvasRef.current) return;
     const video = videoRef.current;
     const canvas = canvasRef.current;
@@ -1011,7 +1018,8 @@ Rules:
       // Check for API errors (auth, quota, etc.)
       if (data.error) {
         if (data.error.type === "authentication_error") {
-          setError("AI key not set. Add your Anthropic API key to the ANTHROPIC_API_KEY setting in the code.");
+          localStorage.removeItem("anthropic_key"); // key was wrong, clear it
+          setError("Invalid API key. Tap Retake then try again — you will be asked to re-enter your key.");
         } else {
           setError("AI error: " + (data.error.message || "Unknown error"));
         }
