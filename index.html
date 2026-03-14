@@ -1647,52 +1647,57 @@ function InventoryScreen({ products, setProducts }) {
       </div>
 
       {showAddForm && (
-        <div className="mx-4 mb-2 bg-zinc-800/80 border border-amber-500/30 rounded-xl p-4 space-y-3">
-          <div className="flex items-center justify-between">
-            <h3 className="text-sm font-bold text-amber-400">Add New Product</h3>
-            {/* AI Snap button — visible for all types, especially useful for weight/piece */}
-            <button onClick={() => setShowAISnap(true)}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gradient-to-r from-violet-500/20 to-purple-500/20 border border-violet-500/40 text-violet-300 text-xs font-bold active:scale-95 transition-all hover:from-violet-500/30">
-              <svg width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z"/><circle cx="12" cy="13" r="4"/></svg>
-              🤖 AI Snap
-            </button>
-          </div>
-
-          {/* Show AI-filled estimate if weight or piece */}
-          {np.aiEstimate && (
-            <div className="flex items-center gap-2 bg-violet-500/10 border border-violet-500/30 rounded-lg px-3 py-2">
-              <span className="text-violet-400 text-sm">🤖</span>
-              <p className="text-xs text-violet-300 flex-1">{np.aiEstimate}</p>
-              <button onClick={() => setNp(prev => ({...prev, aiEstimate: ""}))} className="text-zinc-500 hover:text-zinc-300 text-xs">✕</button>
-            </div>
-          )}
-
-          <div className="grid grid-cols-2 gap-2">
-            <input type="text" value={np.name} onChange={e => setNp({...np, name: e.target.value})} placeholder="Product name" className="col-span-2 bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-amber-500" />
-            <select value={np.type} onChange={e => setNp({...np, type: e.target.value})} className="bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200">
-              <option value="barcode">📦 Barcoded</option><option value="weight">⚖️ By Weight</option><option value="piece">🔢 By Piece</option>
-            </select>
-            <input type="text" value={np.category} onChange={e => setNp({...np, category: e.target.value})} placeholder="Category" className="bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none" />
-            {np.type === "barcode" && <input type="number" value={np.price} onChange={e => setNp({...np, price: e.target.value})} placeholder="Sell Price (UGX)" className="bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none" />}
-            {np.type === "weight" && <input type="number" value={np.pricePerKg} onChange={e => setNp({...np, pricePerKg: e.target.value})} placeholder="Price/Kg (UGX)" className="bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none" />}
-            {np.type === "piece" && <input type="number" value={np.pricePerPiece} onChange={e => setNp({...np, pricePerPiece: e.target.value})} placeholder="Price/Piece (UGX)" className="bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none" />}
-            <input type="number" value={np.cost} onChange={e => setNp({...np, cost: e.target.value})} placeholder="Cost Price" className="bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none" />
-            <input type="number" value={np.stock} onChange={e => setNp({...np, stock: e.target.value})} placeholder="Stock Qty" className="bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none" />
-            <div className="col-span-2 flex gap-2">
-              <input type="text" value={np.barcode} onChange={e => setNp({...np, barcode: e.target.value})} placeholder="Barcode number" className="flex-1 bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none" />
-              <button type="button" onClick={() => setShowInvScanner(true)}
-                className="px-3 bg-cyan-500 text-white rounded-lg font-bold text-sm active:scale-95 flex items-center gap-1">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 7V5a2 2 0 012-2h2M17 3h2a2 2 0 012 2v2M21 17v2a2 2 0 01-2 2h-2M7 21H5a2 2 0 01-2-2v-2"/><line x1="7" y1="12" x2="17" y2="12"/></svg>
-                Scan
+        <div className="fixed inset-0 z-50 bg-black/70 flex flex-col justify-end" onClick={e => { if(e.target === e.currentTarget) setShowAddForm(false); }}>
+          <div className="bg-zinc-900 rounded-t-2xl max-h-[90vh] flex flex-col">
+            {/* Fixed header */}
+            <div className="flex items-center justify-between px-4 pt-4 pb-3 border-b border-zinc-800 flex-shrink-0">
+              <h3 className="text-base font-bold text-amber-400">Add New Product</h3>
+              <button onClick={() => setShowAISnap(true)}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gradient-to-r from-violet-500/20 to-purple-500/20 border border-violet-500/40 text-violet-300 text-xs font-bold active:scale-95 transition-all">
+                <svg width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z"/><circle cx="12" cy="13" r="4"/></svg>
+                🤖 AI Snap
               </button>
             </div>
-          </div>
-          <div className="flex gap-1 flex-wrap">{emojis.map(em => (
-            <button key={em} onClick={() => setNp({...np, image: em})} className={`w-8 h-8 rounded-lg text-lg flex items-center justify-center ${np.image === em ? "bg-amber-500/30 border border-amber-500" : "bg-zinc-900 hover:bg-zinc-700"}`}>{em}</button>
-          ))}</div>
-          <div className="flex gap-2 pb-2">
-            <button onClick={handleAddProduct} disabled={!np.name.trim()} className="flex-1 py-3 rounded-lg bg-amber-500 text-zinc-900 font-bold text-sm active:scale-95 disabled:opacity-40">Save Product</button>
-            <button onClick={() => setShowAddForm(false)} className="flex-1 py-3 rounded-lg bg-zinc-700 text-zinc-300 font-medium text-sm active:scale-95">Cancel</button>
+
+            {/* Scrollable body */}
+            <div className="overflow-y-auto flex-1 px-4 py-3 space-y-3">
+              {np.aiEstimate && (
+                <div className="flex items-center gap-2 bg-violet-500/10 border border-violet-500/30 rounded-lg px-3 py-2">
+                  <span className="text-violet-400 text-sm">🤖</span>
+                  <p className="text-xs text-violet-300 flex-1">{np.aiEstimate}</p>
+                  <button onClick={() => setNp(prev => ({...prev, aiEstimate: ""}))} className="text-zinc-500 text-xs">✕</button>
+                </div>
+              )}
+              <div className="grid grid-cols-2 gap-2">
+                <input type="text" value={np.name} onChange={e => setNp({...np, name: e.target.value})} placeholder="Product name" className="col-span-2 bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2.5 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-amber-500" />
+                <select value={np.type} onChange={e => setNp({...np, type: e.target.value})} className="bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2.5 text-sm text-zinc-200">
+                  <option value="barcode">📦 Barcoded</option><option value="weight">⚖️ By Weight</option><option value="piece">🔢 By Piece</option>
+                </select>
+                <input type="text" value={np.category} onChange={e => setNp({...np, category: e.target.value})} placeholder="Category" className="bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2.5 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none" />
+                {np.type === "barcode" && <input type="number" value={np.price} onChange={e => setNp({...np, price: e.target.value})} placeholder="Sell Price (UGX)" className="bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2.5 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none" />}
+                {np.type === "weight" && <input type="number" value={np.pricePerKg} onChange={e => setNp({...np, pricePerKg: e.target.value})} placeholder="Price/Kg (UGX)" className="bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2.5 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none" />}
+                {np.type === "piece" && <input type="number" value={np.pricePerPiece} onChange={e => setNp({...np, pricePerPiece: e.target.value})} placeholder="Price/Piece (UGX)" className="bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2.5 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none" />}
+                <input type="number" value={np.cost} onChange={e => setNp({...np, cost: e.target.value})} placeholder="Cost Price" className="bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2.5 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none" />
+                <input type="number" value={np.stock} onChange={e => setNp({...np, stock: e.target.value})} placeholder="Stock Qty" className="bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2.5 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none" />
+                <div className="col-span-2 flex gap-2">
+                  <input type="text" value={np.barcode} onChange={e => setNp({...np, barcode: e.target.value})} placeholder="Barcode number" className="flex-1 bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2.5 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none" />
+                  <button type="button" onClick={() => setShowInvScanner(true)}
+                    className="px-3 bg-cyan-500 text-white rounded-lg font-bold text-sm active:scale-95 flex items-center gap-1">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 7V5a2 2 0 012-2h2M17 3h2a2 2 0 012 2v2M21 17v2a2 2 0 01-2 2h-2M7 21H5a2 2 0 01-2-2v-2"/><line x1="7" y1="12" x2="17" y2="12"/></svg>
+                    Scan
+                  </button>
+                </div>
+              </div>
+              <div className="flex gap-1 flex-wrap">{emojis.map(em => (
+                <button key={em} onClick={() => setNp({...np, image: em})} className={`w-8 h-8 rounded-lg text-lg flex items-center justify-center ${np.image === em ? "bg-amber-500/30 border border-amber-500" : "bg-zinc-800 hover:bg-zinc-700"}`}>{em}</button>
+              ))}</div>
+            </div>
+
+            {/* Fixed footer buttons - always visible */}
+            <div className="flex gap-3 px-4 py-4 border-t border-zinc-800 flex-shrink-0">
+              <button onClick={() => setShowAddForm(false)} className="flex-1 py-3.5 rounded-xl bg-zinc-700 text-zinc-300 font-semibold text-sm active:scale-95">Cancel</button>
+              <button onClick={handleAddProduct} disabled={!np.name.trim()} className="flex-1 py-3.5 rounded-xl bg-amber-500 text-zinc-900 font-bold text-sm active:scale-95 disabled:opacity-40">Save Product</button>
+            </div>
           </div>
         </div>
       )}
