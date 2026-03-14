@@ -1023,23 +1023,31 @@ Rules:
       // Check for API errors (auth, quota, etc.)
       if (data.error) {
         if (data.error.type === "authentication_error") {
-          localStorage.removeItem("anthropic_key"); // key was wrong, clear it
-          setError("Invalid API key. Tap Retake then try again — you will be asked to re-enter your key.");
+          localStorage.removeItem("anthropic_key");
+          setError("Invalid API key. Tap Retake and re-enter your key.");
         } else {
-          setError("AI error: " + (data.error.message || "Unknown error"));
+          setError("AI error: " + (data.error.message || data.error.type || JSON.stringify(data.error)));
         }
         setScanning(false);
         return;
       }
-      const text = (data.content || []).map(c => c.text || "").join("").replace(/```json|```/g, "").trim();
+      // Extract raw text from response
+      const rawText = (data.content || []).map(c => c.text || "").join("").trim();
+      // Robustly extract JSON - find first { ... } block
+      const jsonMatch = rawText.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) {
+        setError("Bad response: " + rawText.slice(0, 120));
+        setScanning(false);
+        return;
+      }
       try {
-        const parsed = JSON.parse(text);
+        const parsed = JSON.parse(jsonMatch[0]);
         setResult(parsed);
-      } catch {
-        setError("AI could not read the image clearly. Try retaking with better lighting.");
+      } catch (parseErr) {
+        setError("Parse error: " + jsonMatch[0].slice(0, 120));
       }
     } catch (e) {
-      setError("Could not connect to AI. Check your internet and try again.");
+      setError("Network error: " + (e.message || e.toString()));
     }
     setScanning(false);
   };
