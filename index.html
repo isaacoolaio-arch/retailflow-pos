@@ -1691,111 +1691,187 @@ function InventoryScreen({ products, setProducts }) {
 
       {showAddForm && (
         <div className="fixed inset-0 z-50 bg-black/70 flex flex-col justify-end" onClick={e => { if(e.target === e.currentTarget) setShowAddForm(false); }}>
-          <div className="bg-zinc-900 rounded-t-2xl max-h-[90vh] flex flex-col">
-            {/* Fixed header */}
-            <div className="flex items-center justify-between px-4 pt-4 pb-3 border-b border-zinc-800 flex-shrink-0">
-              <h3 className="text-base font-bold text-amber-400">Add New Product</h3>
+          <div className="bg-zinc-900 rounded-t-2xl max-h-[92vh] flex flex-col">
+
+            {/* Header */}
+            <div className="flex items-center justify-between px-5 pt-5 pb-4 border-b border-zinc-800 flex-shrink-0">
+              <div>
+                <h3 className="text-base font-bold text-zinc-100">Add New Product</h3>
+                <p className="text-xs text-zinc-500 mt-0.5">Fill in the details below</p>
+              </div>
               <button onClick={() => setShowAISnap(true)}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gradient-to-r from-violet-500/20 to-purple-500/20 border border-violet-500/40 text-violet-300 text-xs font-bold active:scale-95 transition-all">
-                <svg width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z"/><circle cx="12" cy="13" r="4"/></svg>
+                className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-violet-500/15 border border-violet-500/30 text-violet-300 text-xs font-bold active:scale-95 transition-all">
                 🤖 AI Snap
               </button>
             </div>
 
-            {/* Scrollable body */}
-            <div className="overflow-y-auto flex-1 px-4 py-3 space-y-3">
+            {/* Body */}
+            <div className="overflow-y-auto flex-1 px-5 py-4 space-y-5">
+
               {np.aiEstimate && (
-                <div className="flex items-center gap-2 bg-violet-500/10 border border-violet-500/30 rounded-lg px-3 py-2">
-                  <span className="text-violet-400 text-sm">🤖</span>
+                <div className="flex items-center gap-2 bg-violet-500/10 border border-violet-500/30 rounded-xl px-3 py-2.5">
+                  <span className="text-violet-400">🤖</span>
                   <p className="text-xs text-violet-300 flex-1">{np.aiEstimate}</p>
-                  <button onClick={() => setNp(prev => ({...prev, aiEstimate: ""}))} className="text-zinc-500 text-xs">✕</button>
+                  <button onClick={() => setNp(prev => ({...prev, aiEstimate: ""}))} className="text-zinc-500 text-sm">✕</button>
                 </div>
               )}
-              <div className="grid grid-cols-2 gap-2">
-                <input type="text" value={np.name} onChange={e => setNp({...np, name: e.target.value})} placeholder="Product name" className="col-span-2 bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2.5 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-amber-500" />
-                <select value={np.type} onChange={e => setNp({...np, type: e.target.value})} className="bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2.5 text-sm text-zinc-200">
-                  <option value="barcode">📦 Barcoded</option><option value="weight">⚖️ By Weight</option><option value="piece">🔢 By Piece</option>
-                </select>
-                <input type="text" value={np.category} onChange={e => setNp({...np, category: e.target.value})} placeholder="Category" className="bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2.5 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none" />
-                {np.type === "barcode" && <input type="number" value={np.price} onChange={e => setNp({...np, price: e.target.value})} placeholder="Sell Price (UGX)" className="bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2.5 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none" />}
-                {np.type === "weight" && <input type="number" value={np.pricePerKg} onChange={e => setNp({...np, pricePerKg: e.target.value})} placeholder="Price/Kg (UGX)" className="bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2.5 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none" />}
-                {np.type === "piece" && <input type="number" value={np.pricePerPiece} onChange={e => setNp({...np, pricePerPiece: e.target.value})} placeholder="Price/Piece (UGX)" className="bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2.5 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none" />}
-                <input type="number" value={np.cost} onChange={e => setNp({...np, cost: e.target.value})} placeholder="Cost Price" className="bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2.5 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none" />
-                <div className="col-span-2 bg-zinc-800/80 border border-zinc-700 rounded-xl p-3 space-y-2">
-                  <p className="text-xs font-semibold text-zinc-400">Stock Quantity</p>
-                  {/* Simple entry */}
-                  <div className="flex items-center gap-2">
-                    <input type="number" value={np.stock} onChange={e => setNp({...np, stock: e.target.value, qtyPacks:"", qtyPerPack:""})}
-                      placeholder="Total qty (e.g. 240)" className="flex-1 bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-amber-500" />
-                    <span className="text-xs text-zinc-500 whitespace-nowrap">{np.unit || "units"}</span>
-                  </div>
-                  {/* OR carton/pack calculator */}
-                  <p className="text-xs text-zinc-600 text-center">— or calculate from packs —</p>
-                  <div className="flex items-center gap-2">
-                    <div className="flex-1">
-                      <p className="text-xs text-zinc-600 mb-1">How many packs/boxes?</p>
-                      <input type="number" value={np.qtyPacks||""} onChange={e => {
-                        const packs = e.target.value;
-                        const perPack = np.qtyPerPack || "";
-                        const total = packs && perPack ? String(Number(packs) * Number(perPack)) : "";
-                        setNp({...np, qtyPacks: packs, stock: total});
-                      }} placeholder="e.g. 10" className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-cyan-500" />
-                    </div>
-                    <span className="text-zinc-600 text-lg mt-4">×</span>
-                    <div className="flex-1">
-                      <p className="text-xs text-zinc-600 mb-1">Units per pack?</p>
-                      <input type="number" value={np.qtyPerPack||""} onChange={e => {
-                        const perPack = e.target.value;
-                        const packs = np.qtyPacks || "";
-                        const total = packs && perPack ? String(Number(packs) * Number(perPack)) : "";
-                        setNp({...np, qtyPerPack: perPack, stock: total});
-                      }} placeholder="e.g. 24" className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-cyan-500" />
-                    </div>
-                    <span className="text-zinc-600 text-lg mt-4">=</span>
-                    <div className="flex-1">
-                      <p className="text-xs text-zinc-600 mb-1">Total</p>
-                      <div className={`w-full rounded-lg px-3 py-2 text-sm font-bold text-center border ${np.stock && np.qtyPacks && np.qtyPerPack ? "bg-amber-500/10 border-amber-500/40 text-amber-400" : "bg-zinc-900 border-zinc-700 text-zinc-600"}`}>
-                        {np.stock || "0"} {np.unit || ""}
-                      </div>
-                    </div>
-                  </div>
-                  {np.qtyPacks && np.qtyPerPack && np.stock && (
-                    <p className="text-xs text-cyan-400 text-center">✓ {np.qtyPacks} packs × {np.qtyPerPack} {np.unit || "units"} = <strong>{np.stock} {np.unit || "units"}</strong> total in stock</p>
-                  )}
+
+              {/* SECTION 1: Basic Info */}
+              <div className="space-y-2">
+                <p className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Basic Info</p>
+                <input type="text" value={np.name} onChange={e => setNp({...np, name: e.target.value})}
+                  placeholder="Product name (e.g. Mukwano Soap)"
+                  className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500/20" />
+                <div className="grid grid-cols-2 gap-2">
+                  <select value={np.type} onChange={e => setNp({...np, type: e.target.value})}
+                    className="bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-3 text-sm text-zinc-200 focus:outline-none">
+                    <option value="barcode">📦 Barcoded</option>
+                    <option value="weight">⚖️ By Weight</option>
+                    <option value="piece">🔢 By Piece</option>
+                  </select>
+                  <input type="text" value={np.category} onChange={e => setNp({...np, category: e.target.value})}
+                    placeholder="Category"
+                    className="bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-3 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none" />
                 </div>
-                <div className="col-span-2">
-                  <p className="text-xs text-zinc-500 mb-1.5">Unit of measurement</p>
+                {/* Icon picker */}
+                <div>
+                  <p className="text-xs text-zinc-500 mb-2">Icon</p>
+                  <div className="flex gap-1.5 flex-wrap">
+                    {emojis.map(em => (
+                      <button key={em} onClick={() => setNp({...np, image: em})}
+                        className={`w-9 h-9 rounded-xl text-lg flex items-center justify-center transition-all ${np.image === em ? "bg-amber-500/25 border-2 border-amber-500/60 scale-110" : "bg-zinc-800 border border-zinc-700 hover:bg-zinc-700"}`}>{em}</button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* SECTION 2: Pricing */}
+              <div className="space-y-2">
+                <p className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Pricing</p>
+                <div className="grid grid-cols-2 gap-2">
+                  {np.type === "barcode" && (
+                    <div className="space-y-1">
+                      <p className="text-xs text-zinc-500 pl-1">Selling Price</p>
+                      <input type="number" value={np.price} onChange={e => setNp({...np, price: e.target.value})}
+                        placeholder="UGX 0"
+                        className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-3 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-amber-500" />
+                    </div>
+                  )}
+                  {np.type === "weight" && (
+                    <div className="space-y-1">
+                      <p className="text-xs text-zinc-500 pl-1">Price per Kg</p>
+                      <input type="number" value={np.pricePerKg} onChange={e => setNp({...np, pricePerKg: e.target.value})}
+                        placeholder="UGX 0"
+                        className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-3 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-amber-500" />
+                    </div>
+                  )}
+                  {np.type === "piece" && (
+                    <div className="space-y-1">
+                      <p className="text-xs text-zinc-500 pl-1">Price per Piece</p>
+                      <input type="number" value={np.pricePerPiece} onChange={e => setNp({...np, pricePerPiece: e.target.value})}
+                        placeholder="UGX 0"
+                        className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-3 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-amber-500" />
+                    </div>
+                  )}
+                  <div className="space-y-1">
+                    <p className="text-xs text-zinc-500 pl-1">Cost / Buy Price</p>
+                    <input type="number" value={np.cost} onChange={e => setNp({...np, cost: e.target.value})}
+                      placeholder="UGX 0"
+                      className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-3 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none" />
+                  </div>
+                </div>
+              </div>
+
+              {/* SECTION 3: Stock */}
+              <div className="space-y-2">
+                <p className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Stock</p>
+
+                {/* Unit selector */}
+                <div>
+                  <p className="text-xs text-zinc-500 mb-2">Sold / measured in</p>
                   <div className="flex flex-wrap gap-1.5">
                     {["pc","pcs","kg","g","dozen","carton","bag","bottle","pack","tin","box","tray","litre","bundle","roll","pair","sack"].map(u => (
                       <button key={u} type="button" onClick={() => setNp({...np, unit: u})}
-                        className={`px-2.5 py-1 rounded-lg text-xs font-semibold border transition-all ${np.unit === u ? "bg-amber-500/25 border-amber-500/60 text-amber-400" : "bg-zinc-800 border-zinc-700 text-zinc-500 hover:text-zinc-300"}`}>
+                        className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all ${np.unit === u ? "bg-amber-500/20 border-amber-500/50 text-amber-400" : "bg-zinc-800 border-zinc-700 text-zinc-500 hover:text-zinc-300"}`}>
                         {u}
                       </button>
                     ))}
-                    <input type="text" value={!["pc","pcs","kg","g","dozen","carton","bag","bottle","pack","tin","box","tray","litre","bundle","roll","pair","sack"].includes(np.unit) ? np.unit : ""}
+                    <input type="text"
+                      value={!["pc","pcs","kg","g","dozen","carton","bag","bottle","pack","tin","box","tray","litre","bundle","roll","pair","sack"].includes(np.unit) ? np.unit : ""}
                       onChange={e => setNp({...np, unit: e.target.value})}
                       placeholder="other..."
-                      className="w-16 bg-zinc-800 border border-zinc-700 rounded-lg px-2 py-1 text-xs text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-amber-500" />
+                      className="w-20 bg-zinc-800 border border-zinc-700 rounded-lg px-2 py-1.5 text-xs text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-amber-500" />
                   </div>
                 </div>
-                <div className="col-span-2 flex gap-2">
-                  <input type="text" value={np.barcode} onChange={e => setNp({...np, barcode: e.target.value})} placeholder="Barcode number" className="flex-1 bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2.5 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none" />
+
+                {/* Quantity - direct or calculated */}
+                <div className="bg-zinc-800/50 border border-zinc-700/50 rounded-xl p-4 space-y-3">
+                  <div className="flex items-center gap-3">
+                    <div className="flex-1 space-y-1">
+                      <p className="text-xs text-zinc-500">Total in stock</p>
+                      <input type="number" value={np.stock}
+                        onChange={e => setNp({...np, stock: e.target.value, qtyPacks:"", qtyPerPack:""})}
+                        placeholder="e.g. 240"
+                        className="w-full bg-zinc-900 border border-zinc-700 rounded-xl px-3 py-2.5 text-sm font-bold text-amber-400 placeholder-zinc-600 focus:outline-none focus:border-amber-500" />
+                    </div>
+                    <div className="text-center pt-5">
+                      <p className="text-zinc-600 text-xs">or</p>
+                    </div>
+                    <div className="flex-1 space-y-1">
+                      <p className="text-xs text-zinc-500">Packs received</p>
+                      <input type="number" value={np.qtyPacks||""}
+                        onChange={e => { const p=e.target.value; const t=p&&np.qtyPerPack?String(Number(p)*Number(np.qtyPerPack)):""; setNp({...np,qtyPacks:p,stock:t}); }}
+                        placeholder="e.g. 10"
+                        className="w-full bg-zinc-900 border border-zinc-700 rounded-xl px-3 py-2.5 text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-cyan-500" />
+                    </div>
+                    <div className="pt-5 text-zinc-600 font-bold">×</div>
+                    <div className="flex-1 space-y-1">
+                      <p className="text-xs text-zinc-500">Per pack</p>
+                      <input type="number" value={np.qtyPerPack||""}
+                        onChange={e => { const pp=e.target.value; const t=np.qtyPacks&&pp?String(Number(np.qtyPacks)*Number(pp)):""; setNp({...np,qtyPerPack:pp,stock:t}); }}
+                        placeholder="e.g. 24"
+                        className="w-full bg-zinc-900 border border-zinc-700 rounded-xl px-3 py-2.5 text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-cyan-500" />
+                    </div>
+                  </div>
+                  {np.qtyPacks && np.qtyPerPack && np.stock ? (
+                    <div className="bg-amber-500/10 border border-amber-500/20 rounded-lg px-3 py-2 text-center">
+                      <p className="text-xs text-amber-400 font-semibold">
+                        {np.qtyPacks} packs × {np.qtyPerPack} {np.unit} = <span className="text-base font-bold">{np.stock} {np.unit}</span> total
+                      </p>
+                    </div>
+                  ) : (
+                    <p className="text-xs text-zinc-600 text-center">Enter total directly, or use packs × per-pack to calculate</p>
+                  )}
+                </div>
+              </div>
+
+              {/* SECTION 4: Barcode (optional) */}
+              <div className="space-y-2">
+                <p className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Barcode <span className="text-zinc-600 font-normal normal-case">(optional)</span></p>
+                <div className="flex gap-2">
+                  <input type="text" value={np.barcode} onChange={e => setNp({...np, barcode: e.target.value})}
+                    placeholder="Scan or type barcode number"
+                    className="flex-1 bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-amber-500" />
                   <button type="button" onClick={() => setShowInvScanner(true)}
-                    className="px-3 bg-cyan-500 text-white rounded-lg font-bold text-sm active:scale-95 flex items-center gap-1">
+                    className="px-4 bg-cyan-500/20 border border-cyan-500/40 text-cyan-400 rounded-xl font-bold text-sm active:scale-95 flex items-center gap-1.5">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 7V5a2 2 0 012-2h2M17 3h2a2 2 0 012 2v2M21 17v2a2 2 0 01-2 2h-2M7 21H5a2 2 0 01-2-2v-2"/><line x1="7" y1="12" x2="17" y2="12"/></svg>
                     Scan
                   </button>
                 </div>
               </div>
-              <div className="flex gap-1 flex-wrap">{emojis.map(em => (
-                <button key={em} onClick={() => setNp({...np, image: em})} className={`w-8 h-8 rounded-lg text-lg flex items-center justify-center ${np.image === em ? "bg-amber-500/30 border border-amber-500" : "bg-zinc-800 hover:bg-zinc-700"}`}>{em}</button>
-              ))}</div>
+
             </div>
 
-            {/* Fixed footer buttons - always visible */}
-            <div className="flex gap-3 px-4 py-4 border-t border-zinc-800 flex-shrink-0">
-              <button onClick={() => setShowAddForm(false)} className="flex-1 py-3.5 rounded-xl bg-zinc-700 text-zinc-300 font-semibold text-sm active:scale-95">Cancel</button>
-              <button onClick={handleAddProduct} disabled={!np.name.trim()} className="flex-1 py-3.5 rounded-xl bg-amber-500 text-zinc-900 font-bold text-sm active:scale-95 disabled:opacity-40">Save Product</button>
+            {/* Footer */}
+            <div className="flex gap-3 px-5 py-4 border-t border-zinc-800 flex-shrink-0">
+              <button onClick={() => setShowAddForm(false)}
+                className="flex-1 py-3.5 rounded-xl bg-zinc-800 text-zinc-400 font-semibold text-sm active:scale-95 border border-zinc-700">
+                Cancel
+              </button>
+              <button onClick={handleAddProduct} disabled={!np.name.trim()}
+                className="flex-2 px-8 py-3.5 rounded-xl bg-amber-500 text-zinc-900 font-bold text-sm active:scale-95 disabled:opacity-40 shadow-lg shadow-amber-500/20">
+                Save Product
+              </button>
             </div>
           </div>
         </div>
