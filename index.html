@@ -1328,7 +1328,16 @@ function POSScreen({ products, cart, setCart, onComplete }) {
   const [showCamera, setShowCamera] = useState(false);
   const [showBarcodeScanner, setShowBarcodeScanner] = useState(false);
   const [notFoundMsg, setNotFoundMsg] = useState(""); // FIX: replace alert() with inline message
-  const [favourites] = useState(["W001", "PC01", "W003", "PC05", "V002", "V004"]);
+  const [favourites, setFavourites] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("fav_products") || "[]"); } catch { return []; }
+  });
+  const toggleFavourite = (id) => {
+    setFavourites(prev => {
+      const updated = prev.includes(id) ? prev.filter(f => f !== id) : [...prev, id];
+      localStorage.setItem("fav_products", JSON.stringify(updated));
+      return updated;
+    });
+  };
 
   // FIX: compute categories dynamically from actual loaded products (not static MOCK_PRODUCTS)
   const allCategories = React.useMemo(
@@ -1497,7 +1506,12 @@ function POSScreen({ products, cart, setCart, onComplete }) {
                 }`}>
                 <span className={`absolute top-1.5 left-1.5 px-1.5 py-0.5 rounded-md text-xs font-semibold border ${typeInfo.color}`} style={{ fontSize: "9px" }}>{typeInfo.icon}</span>
                 {inCart && <span className="absolute -top-1.5 -right-1.5 bg-amber-500 text-zinc-900 text-xs font-bold rounded-full w-5 h-5 flex items-center justify-center shadow">{inCart.qty}</span>}
-                <span className="text-2xl mb-1 mt-1">{p.image}</span>
+                <button onClick={e => { e.stopPropagation(); toggleFavourite(p.id); }}
+                  className="absolute top-1 right-1 text-xs leading-none"
+                  style={{ fontSize: "13px" }}>
+                  {favourites.includes(p.id) ? "⭐" : "☆"}
+                </button>
+                <span className="text-2xl mb-1 mt-3">{p.image}</span>
                 <span className="text-xs text-zinc-300 text-center leading-tight line-clamp-2 font-medium">{p.name}</span>
                 <span className="text-xs text-amber-400 font-bold mt-0.5">{priceDisplay}</span>
               </button>
@@ -1511,7 +1525,7 @@ function POSScreen({ products, cart, setCart, onComplete }) {
 
       {cart.length > 0 && (
         <div className="border-t border-zinc-800 bg-zinc-900/95 backdrop-blur-sm">
-          <div className="max-h-36 overflow-y-auto px-4 pt-3">
+          <div className="max-h-52 overflow-y-auto px-4 pt-3">
             {cart.map(item => (
               <div key={item.cartKey} className="flex items-center gap-2 mb-2 bg-zinc-800/50 rounded-xl px-3 py-2">
                 <span className="text-base">{item.image}</span>
@@ -1578,48 +1592,77 @@ function InventoryScreen({ products, setProducts }) {
   const handleStockSave = (id) => {
     const val = parseInt(editValue);
     if (!isNaN(val) && val >= 0 && setProducts) {
-      playBeep("add"); // 🔔 beep: stock updated
-      setProducts(prev => prev.map(p => {
-        if (p.id !== id) return p;
-        // FIX: variant products store stock inside each variant, not at top level
-        if (p.type === "variant") {
-          // Distribute new total evenly across variants (or just update first variant
-          // if editing from the summary row). Show total across all variants.
-          const perVariant = Math.floor(val / p.variants.length);
-          const remainder = val % p.variants.length;
-          return {
-            ...p,
-            variants: p.variants.map((v, i) => ({
-              ...v,
-              stock: perVariant + (i === 0 ? remainder : 0)
-            }))
-          };
+      playBeep("add");
+      setProducts(prev => {
+        const updated = prev.map(p => {
+          if (p.id !== id) return p;
+          if (p.type === "variant") {
+            const perVariant = Math.floor(val / p.variants.length);
+            const remainder = val % p.variants.length;
+            return { ...p, variants: p.variants.map((v, i) => ({ ...v, stock: perVariant + (i === 0 ? remainder : 0) })) };
+          }
+          return { ...p, stock: val };
+        });
+        const changed = updated.find(p => p.id === id);
+        if (changed) {
+          dbPut("products", changed).catch(() => {});
+          // Sync to sheet
+          api.post("updateStock", { productId: id, stock: val, absolute: true }).catch(() => {});
         }
-        return { ...p, stock: val };
-      }));
+        return updated;
+      });
     }
     setEditingId(null); setEditValue("");
   };
 
-  const handleAddProduct = () => {
+  const handleAddProduct = async () => {
     if (!np.name.trim() || !setProducts) return;
-    playBeep("success"); // 🔔 beep: new product saved
+    playBeep("success");
     const prefix = np.type === "weight" ? "W" : np.type === "piece" ? "PC" : "P";
     const newP = {
       id: prefix + String(Date.now()).slice(-4), type: np.type, barcode: np.barcode || "",
       name: np.name, category: np.category || "General", cost: Number(np.cost) || 0,
-      stock: Number(np.stock) || 0, unit: np.type === "weight" ? "kg" : np.type === "piece" ? "pcs" : "pc",
+      stock: Number(np.stock) || 0, unit: np.unit || (np.type === "weight" ? "kg" : np.type === "piece" ? "pcs" : "pc"),
       image: np.image || "📦"
     };
     if (np.type === "barcode") newP.price = Number(np.price) || 0;
     if (np.type === "weight") { newP.pricePerKg = Number(np.pricePerKg) || 0; newP.minWeight = 0.25; newP.weightStep = 0.25; }
     if (np.type === "piece") newP.pricePerPiece = Number(np.pricePerPiece) || 0;
+    // Save locally first
     setProducts(prev => [...prev, newP]);
+    dbPut("products", newP).catch(() => {});
+    // Then sync to Google Sheet in background
+    api.post("addProduct", newP).catch(() => {});
     setNp({name:"",type:"barcode",category:"General",price:"",cost:"",stock:"",barcode:"",unit:"pc",image:"📦",pricePerKg:"",pricePerPiece:""});
     setShowAddForm(false);
   };
 
   const emojis = ["📦","🥤","🍞","🧴","🧼","🪥","🍪","🍺","🥛","🍚","🌾","🥔","🫘","🌽","🥜","🧅","🍅","🥚","🌯","🍩","🫓","🍌","🧈","🫗","🧂","🧹"];
+
+  const [editProduct, setEditProduct] = useState(null); // product being edited
+  const [deleteConfirm, setDeleteConfirm] = useState(null); // product id to delete
+
+  const handleDeleteProduct = (id) => {
+    setProducts(prev => {
+      const updated = prev.filter(p => p.id !== id);
+      dbDelete("products", id).catch(() => {});
+      api.post("deleteProduct", { productId: id }).catch(() => {});
+      return updated;
+    });
+    setDeleteConfirm(null);
+  };
+
+  const handleEditSave = () => {
+    if (!editProduct || !editProduct.name.trim()) return;
+    setProducts(prev => {
+      const updated = prev.map(p => p.id === editProduct.id ? editProduct : p);
+      dbPut("products", editProduct).catch(() => {});
+      api.post("updateProduct", { productId: editProduct.id, ...editProduct }).catch(() => {});
+      return updated;
+    });
+    setEditProduct(null);
+    playBeep("success");
+  };
 
   return (
     <div className="flex flex-col h-full">
@@ -1679,6 +1722,21 @@ function InventoryScreen({ products, setProducts }) {
                 {np.type === "piece" && <input type="number" value={np.pricePerPiece} onChange={e => setNp({...np, pricePerPiece: e.target.value})} placeholder="Price/Piece (UGX)" className="bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2.5 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none" />}
                 <input type="number" value={np.cost} onChange={e => setNp({...np, cost: e.target.value})} placeholder="Cost Price" className="bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2.5 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none" />
                 <input type="number" value={np.stock} onChange={e => setNp({...np, stock: e.target.value})} placeholder="Stock Qty" className="bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2.5 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none" />
+                <div className="col-span-2">
+                  <p className="text-xs text-zinc-500 mb-1.5">Unit of measurement</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {["pc","pcs","kg","g","dozen","carton","bag","bottle","pack","tin","box","tray","litre","bundle","roll","pair","sack"].map(u => (
+                      <button key={u} type="button" onClick={() => setNp({...np, unit: u})}
+                        className={`px-2.5 py-1 rounded-lg text-xs font-semibold border transition-all ${np.unit === u ? "bg-amber-500/25 border-amber-500/60 text-amber-400" : "bg-zinc-800 border-zinc-700 text-zinc-500 hover:text-zinc-300"}`}>
+                        {u}
+                      </button>
+                    ))}
+                    <input type="text" value={!["pc","pcs","kg","g","dozen","carton","bag","bottle","pack","tin","box","tray","litre","bundle","roll","pair","sack"].includes(np.unit) ? np.unit : ""}
+                      onChange={e => setNp({...np, unit: e.target.value})}
+                      placeholder="other..."
+                      className="w-16 bg-zinc-800 border border-zinc-700 rounded-lg px-2 py-1 text-xs text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-amber-500" />
+                  </div>
+                </div>
                 <div className="col-span-2 flex gap-2">
                   <input type="text" value={np.barcode} onChange={e => setNp({...np, barcode: e.target.value})} placeholder="Barcode number" className="flex-1 bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2.5 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none" />
                   <button type="button" onClick={() => setShowInvScanner(true)}
@@ -1738,15 +1796,84 @@ function InventoryScreen({ products, setProducts }) {
                   <button onClick={() => {setEditingId(null);setEditValue("");}} className="w-7 h-7 rounded-lg bg-zinc-700 text-zinc-400 flex items-center justify-center text-sm">✕</button>
                 </div>
               ) : (
-                <button onClick={() => {setEditingId(p.id);setEditValue(String(stock));}}
-                  className={`px-3 py-1.5 rounded-lg font-bold text-sm border ${stock <= 5 ? "bg-red-500/10 border-red-500/30 text-red-400" : stock <= 15 ? "bg-yellow-500/10 border-yellow-500/30 text-yellow-400" : "bg-zinc-700/50 border-zinc-600/30 text-zinc-300"}`}>
-                  {stock} {p.unit}
-                </button>
+                <div className="flex items-center gap-1.5">
+                  <button onClick={() => {setEditingId(p.id);setEditValue(String(stock));}}
+                    className={`px-2.5 py-1.5 rounded-lg font-bold text-sm border ${stock <= 5 ? "bg-red-500/10 border-red-500/30 text-red-400" : stock <= 15 ? "bg-yellow-500/10 border-yellow-500/30 text-yellow-400" : "bg-zinc-700/50 border-zinc-600/30 text-zinc-300"}`}>
+                    {stock} {p.unit}
+                  </button>
+                  <button onClick={() => setEditProduct({...p})}
+                    className="w-7 h-7 rounded-lg bg-blue-500/15 text-blue-400 flex items-center justify-center text-xs border border-blue-500/20" title="Edit product">✏️</button>
+                  <button onClick={() => setDeleteConfirm(p.id)}
+                    className="w-7 h-7 rounded-lg bg-red-500/10 text-red-400 flex items-center justify-center text-xs border border-red-500/20" title="Delete product">🗑</button>
+                </div>
               )}
             </div>
           );
         })}
       </div>
+
+      {/* Delete confirmation */}
+      {deleteConfirm && (
+        <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-6">
+          <div className="bg-zinc-900 rounded-2xl border border-zinc-700 p-6 w-full max-w-xs space-y-4">
+            <div className="text-center">
+              <span className="text-4xl">🗑️</span>
+              <h3 className="text-base font-bold text-zinc-200 mt-2">Delete Product?</h3>
+              <p className="text-sm text-zinc-500 mt-1">This will remove it from your inventory permanently.</p>
+            </div>
+            <div className="flex gap-3">
+              <button onClick={() => setDeleteConfirm(null)} className="flex-1 py-3 rounded-xl bg-zinc-800 text-zinc-300 font-semibold text-sm">Cancel</button>
+              <button onClick={() => handleDeleteProduct(deleteConfirm)} className="flex-1 py-3 rounded-xl bg-red-500/20 text-red-400 font-bold text-sm border border-red-500/30">Delete</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit product modal */}
+      {editProduct && (
+        <div className="fixed inset-0 z-50 bg-black/70 flex flex-col justify-end">
+          <div className="bg-zinc-900 rounded-t-2xl max-h-[90vh] flex flex-col">
+            <div className="flex items-center justify-between px-4 pt-4 pb-3 border-b border-zinc-800 flex-shrink-0">
+              <h3 className="text-base font-bold text-zinc-200">Edit Product</h3>
+              <button onClick={() => setEditProduct(null)} className="text-zinc-500 text-lg">✕</button>
+            </div>
+            <div className="overflow-y-auto flex-1 px-4 py-3 space-y-3">
+              <div className="grid grid-cols-2 gap-2">
+                <input type="text" value={editProduct.name} onChange={e => setEditProduct({...editProduct, name: e.target.value})} placeholder="Product name" className="col-span-2 bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2.5 text-sm text-zinc-200 focus:outline-none focus:border-amber-500" />
+                <input type="text" value={editProduct.category} onChange={e => setEditProduct({...editProduct, category: e.target.value})} placeholder="Category" className="bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2.5 text-sm text-zinc-200 focus:outline-none" />
+                <input type="text" value={editProduct.image} onChange={e => setEditProduct({...editProduct, image: e.target.value})} placeholder="Emoji icon" className="bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2.5 text-sm text-zinc-200 text-center focus:outline-none" />
+                {editProduct.type === "barcode" && <input type="number" value={editProduct.price||""} onChange={e => setEditProduct({...editProduct, price: Number(e.target.value)})} placeholder="Sell Price (UGX)" className="bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2.5 text-sm text-zinc-200 focus:outline-none" />}
+                {editProduct.type === "weight" && <input type="number" value={editProduct.pricePerKg||""} onChange={e => setEditProduct({...editProduct, pricePerKg: Number(e.target.value)})} placeholder="Price/Kg (UGX)" className="bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2.5 text-sm text-zinc-200 focus:outline-none" />}
+                {editProduct.type === "piece" && <input type="number" value={editProduct.pricePerPiece||""} onChange={e => setEditProduct({...editProduct, pricePerPiece: Number(e.target.value)})} placeholder="Price/Piece (UGX)" className="bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2.5 text-sm text-zinc-200 focus:outline-none" />}
+                <input type="number" value={editProduct.cost||""} onChange={e => setEditProduct({...editProduct, cost: Number(e.target.value)})} placeholder="Cost Price" className="bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2.5 text-sm text-zinc-200 focus:outline-none" />
+                <input type="text" value={editProduct.barcode||""} onChange={e => setEditProduct({...editProduct, barcode: e.target.value})} placeholder="Barcode" className="col-span-2 bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2.5 text-sm text-zinc-200 focus:outline-none" />
+              </div>
+              <div>
+                <p className="text-xs text-zinc-500 mb-1.5">Unit of measurement</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {["pc","pcs","kg","g","dozen","carton","bag","bottle","pack","tin","box","tray","litre","bundle","roll","pair","sack"].map(u => (
+                    <button key={u} type="button" onClick={() => setEditProduct({...editProduct, unit: u})}
+                      className={`px-2.5 py-1 rounded-lg text-xs font-semibold border transition-all ${editProduct.unit === u ? "bg-amber-500/25 border-amber-500/60 text-amber-400" : "bg-zinc-800 border-zinc-700 text-zinc-500 hover:text-zinc-300"}`}>
+                      {u}
+                    </button>
+                  ))}
+                  <input type="text" value={!["pc","pcs","kg","g","dozen","carton","bag","bottle","pack","tin","box","tray","litre","bundle","roll","pair","sack"].includes(editProduct.unit) ? editProduct.unit : ""}
+                    onChange={e => setEditProduct({...editProduct, unit: e.target.value})}
+                    placeholder="other..."
+                    className="w-16 bg-zinc-800 border border-zinc-700 rounded-lg px-2 py-1 text-xs text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-amber-500" />
+                </div>
+              </div>
+              <div className="flex gap-1 flex-wrap">{["📦","🥤","🍞","🧴","🧼","🪥","🍪","🍺","🥛","🍚","🌾","🥔","🫘","🌽","🥜","🧅","🍅","🥚","🌯","🍩","🫓","🍌","🧈","🫗","🧂","🧹"].map(em => (
+                <button key={em} onClick={() => setEditProduct({...editProduct, image: em})} className={`w-8 h-8 rounded-lg text-lg flex items-center justify-center ${editProduct.image === em ? "bg-amber-500/30 border border-amber-500" : "bg-zinc-800 hover:bg-zinc-700"}`}>{em}</button>
+              ))}</div>
+            </div>
+            <div className="flex gap-3 px-4 py-4 border-t border-zinc-800 flex-shrink-0">
+              <button onClick={() => setEditProduct(null)} className="flex-1 py-3.5 rounded-xl bg-zinc-700 text-zinc-300 font-semibold text-sm">Cancel</button>
+              <button onClick={handleEditSave} className="flex-1 py-3.5 rounded-xl bg-amber-500 text-zinc-900 font-bold text-sm">Save Changes</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ✅ Proper barcode scanner modal — same component as POS, works on all phones */}
       {showInvScanner && (
@@ -1800,43 +1927,90 @@ function InventoryScreen({ products, setProducts }) {
   );
 }
 
-function HistoryScreen({ sales }) {
-  const todayTotal = sales.reduce((s, sale) => s + sale.total, 0);
-  const todayProfit = sales.reduce((s, sale) => s + sale.items.reduce((p, i) => p + ((i.unitPrice - (i.cost || 0)) * i.qty), 0), 0);
+function HistoryScreen({ sales: todaySales }) {
+  const [viewDate, setViewDate] = useState(new Date().toISOString().split("T")[0]);
+  const [filterMethod, setFilterMethod] = useState("all");
+  const [historySales, setHistorySales] = useState([]);
+  const [loadingHistory, setLoadingHistory] = useState(false);
+
+  const isToday = viewDate === new Date().toISOString().split("T")[0];
+  const displaySales = isToday ? todaySales : historySales;
+
+  useEffect(() => {
+    if (isToday) return;
+    setLoadingHistory(true);
+    api.get("getSales", { date: viewDate, limit: 200 })
+      .then(res => {
+        if (res && res.success) {
+          const mapped = (res.sales || []).map(s => ({
+            ...s,
+            method: s.method || "cash",
+            time: s.dateTime ? new Date(s.dateTime).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : ""
+          }));
+          setHistorySales(mapped);
+        }
+      })
+      .finally(() => setLoadingHistory(false));
+  }, [viewDate]);
+
+  const filtered = displaySales.filter(s => filterMethod === "all" || s.method === filterMethod);
+  const total = filtered.reduce((s, sale) => s + sale.total, 0);
+  const profit = filtered.reduce((s, sale) => s + (sale.items || []).reduce((p, i) => p + ((i.unitPrice - (i.cost || 0)) * i.qty), 0), 0);
 
   return (
     <div className="flex flex-col h-full">
-      <div className="p-4">
-        <div className="bg-gradient-to-br from-amber-500/10 to-orange-500/10 rounded-2xl border border-amber-500/20 p-5">
-          <p className="text-xs text-amber-400/70 uppercase tracking-wider mb-1">Today's Sales</p>
-          <p className="text-3xl font-bold text-amber-400" style={{ fontFamily: "'DM Sans', sans-serif" }}>{formatUGX(todayTotal)}</p>
-          <div className="flex gap-4 mt-3">
-            <div><p className="text-xs text-zinc-500">Transactions</p><p className="text-lg font-bold text-zinc-200">{sales.length}</p></div>
-            <div><p className="text-xs text-zinc-500">Gross Profit</p><p className="text-lg font-bold text-emerald-400">{formatUGX(todayProfit)}</p></div>
-            <div><p className="text-xs text-zinc-500">Avg. Sale</p><p className="text-lg font-bold text-zinc-200">{sales.length > 0 ? formatUGX(Math.round(todayTotal / sales.length)) : "—"}</p></div>
+      {/* Date picker + filter */}
+      <div className="px-4 pt-4 pb-2 space-y-2">
+        <div className="flex gap-2">
+          <input type="date" value={viewDate} onChange={e => setViewDate(e.target.value)} max={new Date().toISOString().split("T")[0]}
+            className="flex-1 bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-2.5 text-sm text-zinc-200 focus:outline-none focus:border-amber-500" />
+          <button onClick={() => setViewDate(new Date().toISOString().split("T")[0])}
+            className={`px-3 py-2.5 rounded-xl text-xs font-bold border transition-all ${isToday ? "bg-amber-500/20 border-amber-500/40 text-amber-400" : "bg-zinc-800 border-zinc-700 text-zinc-400"}`}>Today</button>
+        </div>
+        <div className="flex gap-2">
+          {[["all","All"],["cash","💵 Cash"],["momo","📱 MoMo"],["credit","📝 Credit"]].map(([id, label]) => (
+            <button key={id} onClick={() => setFilterMethod(id)}
+              className={`flex-1 py-1.5 rounded-lg text-xs font-medium border transition-all ${filterMethod === id ? "bg-amber-500/20 border-amber-500/40 text-amber-400" : "bg-zinc-800/60 border-zinc-700/30 text-zinc-500"}`}>{label}</button>
+          ))}
+        </div>
+      </div>
+
+      {/* Summary card */}
+      <div className="px-4 pb-2">
+        <div className="bg-gradient-to-br from-amber-500/10 to-orange-500/10 rounded-2xl border border-amber-500/20 p-4">
+          <p className="text-xs text-amber-400/70 uppercase tracking-wider mb-1">{isToday ? "Today" : viewDate}</p>
+          <p className="text-3xl font-bold text-amber-400">{formatUGX(total)}</p>
+          <div className="flex gap-4 mt-2">
+            <div><p className="text-xs text-zinc-500">Transactions</p><p className="text-lg font-bold text-zinc-200">{filtered.length}</p></div>
+            <div><p className="text-xs text-zinc-500">Gross Profit</p><p className="text-lg font-bold text-emerald-400">{formatUGX(profit)}</p></div>
+            <div><p className="text-xs text-zinc-500">Avg. Sale</p><p className="text-lg font-bold text-zinc-200">{filtered.length > 0 ? formatUGX(Math.round(total / filtered.length)) : "-"}</p></div>
           </div>
         </div>
       </div>
+
+      {/* Sales list */}
       <div className="flex-1 overflow-y-auto px-4 pb-4">
-        {sales.length === 0 ? (
-          <div className="text-center py-16"><span className="text-5xl mb-4 block">🧾</span><p className="text-zinc-500">No sales yet today</p><p className="text-zinc-600 text-sm mt-1">Complete a sale to see it here</p></div>
+        {loadingHistory ? (
+          <div className="text-center py-12"><div className="w-8 h-8 border-2 border-amber-500 border-t-transparent rounded-full animate-spin mx-auto mb-3" /><p className="text-zinc-500 text-sm">Loading sales...</p></div>
+        ) : filtered.length === 0 ? (
+          <div className="text-center py-16"><span className="text-5xl mb-4 block">🧾</span><p className="text-zinc-500">No sales for this day</p><p className="text-zinc-600 text-sm mt-1">Try a different date or payment filter</p></div>
         ) : (
           <div className="space-y-2">
-            {[...sales].reverse().map((sale) => (
-              <div key={sale.id} className="bg-zinc-800/40 rounded-xl border border-zinc-700/30 p-4">
+            {[...filtered].reverse().map((sale) => (
+              <div key={sale.id || sale.offlineId} className="bg-zinc-800/40 rounded-xl border border-zinc-700/30 p-4">
                 <div className="flex items-center justify-between mb-2">
                   <div className="flex items-center gap-2">
                     <span className={`px-2 py-0.5 rounded-md text-xs font-medium ${sale.method === "cash" ? "bg-emerald-500/15 text-emerald-400" : sale.method === "momo" ? "bg-blue-500/15 text-blue-400" : "bg-orange-500/15 text-orange-400"}`}>
                       {sale.method === "cash" ? "💵 Cash" : sale.method === "momo" ? "📱 MoMo" : "📝 Credit"}
                     </span>
-                    <span className="text-xs text-zinc-600">#{sale.id}</span>
+                    <span className="text-xs text-zinc-600">#{sale.id || "local"}</span>
                   </div>
                   <span className="text-xs text-zinc-500">{sale.time}</span>
                 </div>
                 <div className="space-y-1">
-                  {sale.items.map((item, j) => (
+                  {(sale.items || []).map((item, j) => (
                     <div key={j} className="flex justify-between text-sm">
-                      <span className="text-zinc-400">{item.image} {item.name} {item.type !== "weight" ? `× ${item.qty}` : ""}</span>
+                      <span className="text-zinc-400">{item.image} {item.name} {item.type !== "weight" ? `x${item.qty}` : ""}</span>
                       <span className="text-zinc-300 font-medium">{formatUGX(item.lineTotal)}</span>
                     </div>
                   ))}
