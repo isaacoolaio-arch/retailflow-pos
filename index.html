@@ -43,61 +43,6 @@ var useCallback = React.useCallback;
 // Leave empty to use demo/mock data mode
 const API_URL = "https://script.google.com/macros/s/AKfycbwZ3aTUSC89PVPmE4J47oaq8lXeJqdyfBQrvU4xC4Eko9Tn9SZ7dKiCauMotsNpENur_g/exec";
 const DEVICE_ID = "device_" + Math.random().toString(36).substr(2, 8);
-// For AI Snap feature - get your key from https://console.anthropic.com
-const ANTHROPIC_API_KEY = ""; // DO NOT put key here - app will ask you to enter it safely
-
-// ─── Audio Beep Utility ───────────────────────────────────────
-// Uses Web Audio API — no external files, works fully offline
-
-function playBeep(type) {
-  try {
-    const ctx = new (window.AudioContext || window.webkitAudioContext)();
-
-    // Helper: play one short high-pitched pip
-    function pip(startTime, duration) {
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      osc.type = "sine";
-      osc.frequency.setValueAtTime(2800, startTime);
-      gain.gain.setValueAtTime(0.45, startTime);
-      gain.gain.exponentialRampToValueAtTime(0.001, startTime + duration);
-      osc.start(startTime);
-      osc.stop(startTime + duration);
-      osc.onended = () => ctx.close();
-    }
-
-    const t = ctx.currentTime;
-    const ON  = 0.045; // pip on-time
-    const GAP = 0.055; // gap between pips
-
-    if (type === "success") {
-      // ti-ti  (two quick high pips)
-      pip(t,           ON);
-      pip(t + ON + GAP, ON);
-    } else if (type === "error") {
-      // Low descending tone — not found
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      osc.type = "sawtooth";
-      osc.frequency.setValueAtTime(400, t);
-      osc.frequency.exponentialRampToValueAtTime(200, t + 0.3);
-      gain.gain.setValueAtTime(0.35, t);
-      gain.gain.exponentialRampToValueAtTime(0.001, t + 0.3);
-      osc.start(t);
-      osc.stop(t + 0.3);
-      osc.onended = () => ctx.close();
-    } else if (type === "add") {
-      // ti-ti-ti  (three quick high pips)
-      pip(t,                   ON);
-      pip(t + ON + GAP,         ON);
-      pip(t + (ON + GAP) * 2,   ON);
-    }
-  } catch (e) { /* ignore if audio not supported */ }
-}
 
 // ─── IndexedDB Offline Cache ──────────────────────────────────
 
@@ -310,9 +255,11 @@ function useProducts() {
         }
       }
 
-      // 3. No API and no cache - start empty so user can add their own products
-      setProducts([]);
-      setSource("demo");
+      // 3. Fallback to demo data if nothing else worked
+      if (products.length === 0) {
+        setProducts(MOCK_PRODUCTS);
+        setSource("demo");
+      }
       setLoading(false);
     };
     load();
@@ -338,7 +285,66 @@ function useProducts() {
 // "piece"    → tap product, enter count (pieces)
 // "variant"  → tap product, choose size/portion variant
 
-const MOCK_PRODUCTS = []; // Add your products in the Stock tab
+const MOCK_PRODUCTS = [
+  // BARCODED PRODUCTS (factory goods with barcodes)
+  { id: "P001", type: "barcode", barcode: "8901234567890", name: "Coca Cola 500ml", category: "Beverages", price: 2500, cost: 1800, stock: 48, unit: "bottle", image: "🥤" },
+  { id: "P002", type: "barcode", barcode: "8901234567891", name: "Bread - White Loaf", category: "Bakery", price: 5000, cost: 3500, stock: 24, unit: "loaf", image: "🍞" },
+  { id: "P003", type: "barcode", barcode: "8901234567892", name: "Omo Detergent 1kg", category: "Household", price: 8000, cost: 6200, stock: 15, unit: "pack", image: "🧴" },
+  { id: "P004", type: "barcode", barcode: "8901234567893", name: "Colgate Toothpaste", category: "Personal Care", price: 4000, cost: 2800, stock: 35, unit: "tube", image: "🪥" },
+  { id: "P005", type: "barcode", barcode: "8901234567894", name: "Cowboy Biscuits", category: "Snacks", price: 500, cost: 350, stock: 60, unit: "pack", image: "🍪" },
+  { id: "P006", type: "barcode", barcode: "8901234567895", name: "Mukwano Soap Bar", category: "Household", price: 3500, cost: 2500, stock: 40, unit: "bar", image: "🧼" },
+  { id: "P007", type: "barcode", barcode: "8901234567896", name: "Nile Special 500ml", category: "Beverages", price: 4000, cost: 3000, stock: 30, unit: "bottle", image: "🍺" },
+  { id: "P008", type: "barcode", barcode: "8901234567897", name: "Fresh Milk 500ml", category: "Dairy", price: 3000, cost: 2200, stock: 40, unit: "pack", image: "🥛" },
+
+  // WEIGHT-BASED PRODUCTS (sold by kg - weighed at counter)
+  { id: "W001", type: "weight", barcode: "", name: "Sugar (Loose)", category: "Grocery", pricePerKg: 5000, cost: 3800, stock: 100, unit: "kg", image: "🍚", minWeight: 0.25, weightStep: 0.25 },
+  { id: "W002", type: "weight", barcode: "", name: "Rice (Loose)", category: "Grocery", pricePerKg: 5500, cost: 4200, stock: 150, unit: "kg", image: "🌾", minWeight: 0.5, weightStep: 0.5 },
+  { id: "W003", type: "weight", barcode: "", name: "Irish Potatoes", category: "Fresh Produce", pricePerKg: 3000, cost: 2000, stock: 200, unit: "kg", image: "🥔", minWeight: 0.5, weightStep: 0.5 },
+  { id: "W004", type: "weight", barcode: "", name: "Beans (Loose)", category: "Grocery", pricePerKg: 6000, cost: 4500, stock: 80, unit: "kg", image: "🫘", minWeight: 0.25, weightStep: 0.25 },
+  { id: "W005", type: "weight", barcode: "", name: "Maize Flour (Posho)", category: "Grocery", pricePerKg: 3500, cost: 2500, stock: 120, unit: "kg", image: "🌽", minWeight: 0.5, weightStep: 0.5 },
+  { id: "W006", type: "weight", barcode: "", name: "Groundnuts", category: "Grocery", pricePerKg: 10000, cost: 7500, stock: 40, unit: "kg", image: "🥜", minWeight: 0.25, weightStep: 0.25 },
+  { id: "W007", type: "weight", barcode: "", name: "Onions", category: "Fresh Produce", pricePerKg: 4000, cost: 2800, stock: 60, unit: "kg", image: "🧅", minWeight: 0.25, weightStep: 0.25 },
+  { id: "W008", type: "weight", barcode: "", name: "Tomatoes", category: "Fresh Produce", pricePerKg: 5000, cost: 3500, stock: 50, unit: "kg", image: "🍅", minWeight: 0.25, weightStep: 0.25 },
+
+  // PIECE-BASED PRODUCTS (sold per piece, no barcode)
+  { id: "PC01", type: "piece", barcode: "", name: "Eggs (per piece)", category: "Dairy", pricePerPiece: 500, cost: 350, stock: 300, unit: "pcs", image: "🥚" },
+  { id: "PC02", type: "piece", barcode: "", name: "Rolex Chapati", category: "Ready Food", pricePerPiece: 3000, cost: 2000, stock: 20, unit: "pcs", image: "🌯" },
+  { id: "PC03", type: "piece", barcode: "", name: "Mandazi", category: "Bakery", pricePerPiece: 200, cost: 100, stock: 100, unit: "pcs", image: "🍩" },
+  { id: "PC04", type: "piece", barcode: "", name: "Samosa", category: "Ready Food", pricePerPiece: 1000, cost: 600, stock: 50, unit: "pcs", image: "🔺" },
+  { id: "PC05", type: "piece", barcode: "", name: "Chapati", category: "Bakery", pricePerPiece: 1000, cost: 600, stock: 40, unit: "pcs", image: "🫓" },
+  { id: "PC06", type: "piece", barcode: "", name: "Banana (cooking)", category: "Fresh Produce", pricePerPiece: 300, cost: 150, stock: 80, unit: "pcs", image: "🍌" },
+
+  // VARIANT PRODUCTS (big package with barcode, sold in smaller portions)
+  { id: "V001", type: "variant", barcode: "8901234567900", name: "Blue Band", category: "Dairy", image: "🧈", cost: 1500,
+    variants: [
+      { label: "Small (100g)", price: 2000, stock: 30, unit: "pc" },
+      { label: "Medium (250g)", price: 4500, stock: 20, unit: "pc" },
+      { label: "Large (500g)", price: 8000, stock: 15, unit: "pc" },
+    ]
+  },
+  { id: "V002", type: "variant", barcode: "", name: "Cooking Oil", category: "Grocery", image: "🫗", cost: 800,
+    variants: [
+      { label: "Small (250ml)", price: 3000, stock: 25, unit: "pc" },
+      { label: "Medium (500ml)", price: 5500, stock: 18, unit: "pc" },
+      { label: "Large (1L)", price: 10000, stock: 12, unit: "pc" },
+      { label: "Jerrycan (5L)", price: 45000, stock: 5, unit: "pc" },
+    ]
+  },
+  { id: "V003", type: "variant", barcode: "", name: "Washing Powder", category: "Household", image: "🧹", cost: 300,
+    variants: [
+      { label: "Small sachet", price: 500, stock: 80, unit: "pc" },
+      { label: "Medium (500g)", price: 4000, stock: 25, unit: "pc" },
+      { label: "Large (1kg)", price: 7500, stock: 10, unit: "pc" },
+    ]
+  },
+  { id: "V004", type: "variant", barcode: "", name: "Royco Seasoning", category: "Spices", image: "🧂", cost: 100,
+    variants: [
+      { label: "Single cube", price: 200, stock: 200, unit: "pc" },
+      { label: "Strip (10 cubes)", price: 1800, stock: 40, unit: "strip" },
+      { label: "Box (24 cubes)", price: 4000, stock: 15, unit: "box" },
+    ]
+  },
+];
 
 const TYPE_LABELS = {
   barcode: { label: "Scan", color: "bg-blue-500/15 text-blue-400 border-blue-500/25", icon: "📦" },
@@ -347,6 +353,7 @@ const TYPE_LABELS = {
   variant: { label: "Size", color: "bg-purple-500/15 text-purple-400 border-purple-500/25", icon: "📐" },
 };
 
+const ALL_CATEGORIES = ["All", "Favourites", ...new Set(MOCK_PRODUCTS.map(p => p.category))];
 const formatUGX = (amount) => `UGX ${Math.round(amount).toLocaleString()}`;
 
 function SearchInput({ value, onChange, placeholder, autoFocus }) {
@@ -623,7 +630,6 @@ function PaymentModal({ cart, total, onClose, onConfirm }) {
 function CameraScanModal({ products, onProductFound, onClose }) {
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
-  const streamRef = useRef(null); // FIX: use ref so cleanup always has the live stream
   const [stream, setStream] = useState(null);
   const [scanning, setScanning] = useState(false);
   const [result, setResult] = useState(null);
@@ -646,12 +652,8 @@ function CameraScanModal({ products, onProductFound, onClose }) {
         });
         if (mounted && videoRef.current) {
           videoRef.current.srcObject = mediaStream;
-          streamRef.current = mediaStream; // FIX: store in ref immediately
           setStream(mediaStream);
           setCameraReady(true);
-        } else {
-          // Component unmounted before camera was ready — stop stream immediately
-          mediaStream.getTracks().forEach(t => t.stop());
         }
       } catch (err) {
         if (mounted) setError("Camera access denied. Please allow camera permission.");
@@ -660,19 +662,12 @@ function CameraScanModal({ products, onProductFound, onClose }) {
     startCamera();
     return () => {
       mounted = false;
-      // FIX: use ref (not stale state) to reliably stop the stream
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach(t => t.stop());
-        streamRef.current = null;
-      }
+      if (stream) stream.getTracks().forEach(t => t.stop());
     };
   }, []);
 
   const stopCamera = () => {
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach(t => t.stop());
-      streamRef.current = null;
-    }
+    if (stream) stream.getTracks().forEach(t => t.stop());
   };
 
   const captureAndIdentify = async () => {
@@ -696,12 +691,7 @@ function CameraScanModal({ products, onProductFound, onClose }) {
 
       const response = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-api-key": (localStorage.getItem("anthropic_key") || ""),
-          "anthropic-version": "2023-06-01",
-          "anthropic-dangerous-direct-browser-access": "true"
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           model: "claude-sonnet-4-20250514",
           max_tokens: 1000,
@@ -912,406 +902,58 @@ If confidence is low or you cannot identify: {"product_id": null, "product_name"
 }
 
 
-// ─── AI Snap Modal (for Add Product form) ────────────────────
-// Snaps a photo → asks Claude to identify the item → auto-fills
-// name, category, emoji, and weight_kg / piece_count estimate.
-
-function AISnapModal({ productType, onFill, onClose }) {
-  const videoRef = useRef(null);
-  const canvasRef = useRef(null);
-  const streamRef = useRef(null);
-  const [cameraReady, setCameraReady] = useState(false);
-  const [capturedImage, setCapturedImage] = useState(null);
+function BarcodeScannerModal({ onScan, onClose }) {
+  const scannerRef = useRef(null);
   const [scanning, setScanning] = useState(false);
-  const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
+  const html5QrcodeRef = useRef(null);
 
-  // Start camera on mount
-  useEffect(() => {
-    let mounted = true;
-    navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 } } })
-      .then(stream => {
-        if (!mounted) { stream.getTracks().forEach(t => t.stop()); return; }
-        streamRef.current = stream;
-        if (videoRef.current) videoRef.current.srcObject = stream;
-        setCameraReady(true);
-      })
-      .catch(() => {
-        if (mounted) setError("Camera access denied. Please allow camera permission.");
+  useEffect(function() {
+    var scanner = null;
+    try {
+      scanner = new Html5Qrcode("barcode-reader");
+      html5QrcodeRef.current = scanner;
+      scanner.start(
+        { facingMode: "environment" },
+        { fps: 10, qrbox: { width: 280, height: 150 }, aspectRatio: 1.777 },
+        function(decodedText) {
+          scanner.stop().then(function() {
+            onScan(decodedText);
+          }).catch(function() { onScan(decodedText); });
+        },
+        function(err) { /* ignore scan errors */ }
+      ).then(function() {
+        setScanning(true);
+      }).catch(function(err) {
+        setError("Camera access denied or not available");
       });
-    return () => {
-      mounted = false;
-      if (streamRef.current) { streamRef.current.getTracks().forEach(t => t.stop()); streamRef.current = null; }
+    } catch(e) {
+      setError("Barcode scanner not supported");
+    }
+    return function() {
+      if (html5QrcodeRef.current) {
+        try { html5QrcodeRef.current.stop(); } catch(e) {}
+      }
     };
   }, []);
 
-  const stopCamera = () => {
-    if (streamRef.current) { streamRef.current.getTracks().forEach(t => t.stop()); streamRef.current = null; }
-  };
-
-  const snapAndIdentify = async () => {
-    // Check for API key - prompt user if not saved yet
-    let apiKey = localStorage.getItem("anthropic_key");
-    if (!apiKey) {
-      apiKey = window.prompt("Enter your Anthropic API key to use AI Snap:\n(starts with sk-ant-...)\n\nYour key is saved only on this device, never uploaded anywhere.");
-      if (!apiKey || !apiKey.trim()) return;
-      localStorage.setItem("anthropic_key", apiKey.trim());
-    }
-    if (!videoRef.current || !canvasRef.current) return;
-    const video = videoRef.current;
-    const canvas = canvasRef.current;
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-    canvas.getContext("2d").drawImage(video, 0, 0);
-    const imageData = canvas.toDataURL("image/jpeg", 0.8);
-    setCapturedImage(imageData);
-    setScanning(true);
-    setResult(null);
-    setError(null);
-
-    try {
-      const base64 = imageData.split(",")[1];
-      const typeHint = productType === "weight" ? "This is a BY WEIGHT product (sold per kg). Focus on estimating weight." :
-                       productType === "piece"  ? "This is a BY PIECE product (sold per piece/count). Focus on counting pieces." :
-                                                  "This is a BARCODED packaged product.";
-
-      const response = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-api-key": localStorage.getItem("anthropic_key") || "",
-          "anthropic-version": "2023-06-01",
-          "anthropic-dangerous-direct-browser-access": "true"
-        },
-        body: JSON.stringify({
-          model: "claude-haiku-4-5-20251001",
-          max_tokens: 500,
-          messages: [{
-            role: "user",
-            content: [
-              { type: "image", source: { type: "base64", media_type: "image/jpeg", data: base64 } },
-              { type: "text", text: `You are helping a shopkeeper in Uganda add a new product to their retail inventory system.
-${typeHint}
-
-Look at this image carefully and identify what item it is.
-
-Return ONLY this exact JSON — no extra text, no markdown:
-{
-  "name": "Sugar (Loose)",
-  "category": "Grocery",
-  "emoji": "🍚",
-  "estimated_weight_kg": 1.0,
-  "estimated_pieces": null,
-  "suggested_type": "weight",
-  "notes": "White granulated sugar in a clear polythene bag, approximately 1kg"
-}
-
-Rules:
-- name: short product name as sold in a Ugandan shop
-- category: one of [Grocery, Beverages, Bakery, Dairy, Household, Personal Care, Snacks, Fresh Produce, Ready Food, Spices, Other]
-- emoji: single most fitting emoji for this product
-- estimated_weight_kg: number if it looks like a weight item, else null
-- estimated_pieces: number if countable, else null  
-- suggested_type: "weight" if sold by kg, "piece" if sold per piece/count, "barcode" if it's a packaged product with a barcode
-- notes: brief description of what you see` }
-            ]
-          }]
-        })
-      });
-
-      const data = await response.json();
-      // Check for API errors (auth, quota, etc.)
-      if (data.error) {
-        if (data.error.type === "authentication_error") {
-          localStorage.removeItem("anthropic_key");
-          setError("Invalid API key. Tap Retake and re-enter your key.");
-        } else {
-          setError("AI error: " + (data.error.message || data.error.type || JSON.stringify(data.error)));
-        }
-        setScanning(false);
-        return;
-      }
-      // Extract raw text from response
-      const rawText = (data.content || []).map(c => c.text || "").join("").trim();
-      // Robustly extract JSON - find first { ... } block
-      const jsonMatch = rawText.match(/\{[\s\S]*\}/);
-      if (!jsonMatch) {
-        setError("Bad response: " + rawText.slice(0, 120));
-        setScanning(false);
-        return;
-      }
-      try {
-        const parsed = JSON.parse(jsonMatch[0]);
-        setResult(parsed);
-      } catch (parseErr) {
-        setError("Parse error: " + jsonMatch[0].slice(0, 120));
-      }
-    } catch (e) {
-      setError("Network error: " + (e.message || e.toString()));
-    }
-    setScanning(false);
-  };
-
-  const handleRetake = () => { setCapturedImage(null); setResult(null); setError(null); };
-
-  const handleUseResult = () => {
-    if (!result) return;
-    stopCamera();
-    onFill(result);
-  };
-
   return (
-    <div className="fixed inset-0 bg-black z-50 flex flex-col">
-      {/* Header */}
-      <div className="flex items-center justify-between p-4 bg-zinc-950 border-b border-zinc-800">
-        <div className="flex items-center gap-2">
-          <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center text-sm">🤖</div>
-          <div>
-            <h3 className="text-sm font-bold text-white">AI Product Identifier</h3>
-            <p className="text-xs text-zinc-400">
-              {productType === "weight" ? "Snap to estimate weight & identify" :
-               productType === "piece"  ? "Snap to count pieces & identify" :
-                                          "Snap to identify product"}
-            </p>
-          </div>
-        </div>
-        <button onClick={() => { stopCamera(); onClose(); }} className="w-10 h-10 rounded-full bg-zinc-800 flex items-center justify-center text-zinc-300 text-lg">✕</button>
-      </div>
-
-      {/* Camera / captured image */}
-      <div className="flex-1 relative bg-black overflow-hidden">
-        {!capturedImage ? (
-          <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover" />
-        ) : (
-          <img src={capturedImage} alt="captured" className="w-full h-full object-cover" />
-        )}
-
-        {/* Scanning overlay */}
-        {scanning && (
-          <div className="absolute inset-0 bg-black/60 flex flex-col items-center justify-center gap-3">
-            <div className="w-12 h-12 border-3 border-violet-400 border-t-transparent rounded-full animate-spin" style={{borderWidth:"3px"}} />
-            <p className="text-violet-300 font-semibold">AI identifying product...</p>
-            <p className="text-zinc-400 text-sm">
-              {productType === "weight" ? "Estimating weight..." :
-               productType === "piece"  ? "Counting pieces..." : "Reading product..."}
-            </p>
-          </div>
-        )}
-
-        {/* Camera ready crosshair hint */}
-        {!capturedImage && cameraReady && !scanning && (
-          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-            <div className="w-48 h-48 border-2 border-white/40 rounded-2xl" />
-          </div>
-        )}
-      </div>
-
-      <canvas ref={canvasRef} className="hidden" />
-
-      {/* Bottom panel */}
-      <div className="bg-zinc-900 border-t border-zinc-800 p-4 space-y-3">
-
-        {/* Error */}
-        {error && (
-          <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-3 flex items-start gap-2">
-            <span className="text-red-400 mt-0.5">⚠️</span>
-            <p className="text-sm text-red-300 flex-1">{error}</p>
-          </div>
-        )}
-
-        {/* AI Result card */}
-        {result && !error && (
-          <div className="bg-violet-500/10 border border-violet-500/30 rounded-xl p-4 space-y-2">
-            <div className="flex items-center gap-3">
-              <span className="text-3xl">{result.emoji || "📦"}</span>
-              <div className="flex-1">
-                <p className="text-base font-bold text-zinc-100">{result.name}</p>
-                <p className="text-xs text-zinc-400">{result.category}</p>
-              </div>
-              <span className="text-xs px-2 py-1 rounded-lg bg-violet-500/20 text-violet-300 font-semibold border border-violet-500/30">
-                {result.suggested_type === "weight" ? "⚖️ By Weight" :
-                 result.suggested_type === "piece"  ? "🔢 By Piece" : "📦 Barcoded"}
-              </span>
-            </div>
-            {result.estimated_weight_kg && (
-              <div className="flex items-center gap-2 bg-amber-500/10 border border-amber-500/20 rounded-lg px-3 py-2">
-                <span className="text-amber-400">⚖️</span>
-                <p className="text-sm text-amber-300 font-medium">Estimated weight: ~{result.estimated_weight_kg} kg</p>
-              </div>
-            )}
-            {result.estimated_pieces && (
-              <div className="flex items-center gap-2 bg-emerald-500/10 border border-emerald-500/20 rounded-lg px-3 py-2">
-                <span className="text-emerald-400">🔢</span>
-                <p className="text-sm text-emerald-300 font-medium">Estimated count: ~{result.estimated_pieces} pieces</p>
-              </div>
-            )}
-            {result.notes && <p className="text-xs text-zinc-500 italic">{result.notes}</p>}
-          </div>
-        )}
-
-        {/* Action buttons */}
-        <div className="flex gap-3">
-          {!capturedImage ? (
-            <button onClick={snapAndIdentify} disabled={!cameraReady || scanning}
-              className={`flex-1 py-4 rounded-2xl font-bold text-lg flex items-center justify-center gap-2 transition-all active:scale-95 ${
-                cameraReady && !scanning
-                  ? "bg-gradient-to-r from-violet-500 to-purple-600 text-white shadow-lg shadow-violet-500/30"
-                  : "bg-zinc-800 text-zinc-500 cursor-not-allowed"
-              }`}>
-              <svg width="22" height="22" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                <path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z"/><circle cx="12" cy="13" r="4"/>
-              </svg>
-              {scanning ? "Identifying..." : "Snap & Identify"}
-            </button>
-          ) : (
-            <>
-              <button onClick={handleRetake}
-                className="flex-1 py-4 rounded-2xl bg-zinc-800 text-zinc-300 font-bold text-base hover:bg-zinc-700 active:scale-95 transition-all">
-                ↻ Retake
-              </button>
-              {result && (
-                <button onClick={handleUseResult}
-                  className="flex-1 py-4 rounded-2xl bg-gradient-to-r from-violet-500 to-purple-600 text-white font-bold text-base shadow-lg shadow-violet-500/30 active:scale-95 transition-all">
-                  ✓ Use This
-                </button>
-              )}
-            </>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-
-function BarcodeScannerModal({ onScan, onClose }) {
-  // Use a unique ID per mount so stale instances from a previous open never collide
-  const uid = useRef("bcs_" + Math.random().toString(36).substr(2, 6));
-  const instanceRef = useRef(null);
-  const [status, setStatus] = useState("starting"); // "starting" | "scanning" | "error"
-  const [errorMsg, setErrorMsg] = useState("");
-
-  const stopScanner = useCallback(function() {
-    if (instanceRef.current) {
-      try { instanceRef.current.stop().catch(function(){}); } catch(e) {}
-      instanceRef.current = null;
-    }
-  }, []);
-
-  const startScanner = useCallback(function() {
-    setStatus("starting");
-    setErrorMsg("");
-
-    // Guard: Html5Qrcode library must be loaded
-    if (typeof Html5Qrcode === "undefined") {
-      setStatus("error");
-      setErrorMsg("Scanner library not loaded. Check your internet connection and reload the page.");
-      return;
-    }
-
-    // Guard: camera API must exist
-    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      setStatus("error");
-      setErrorMsg("Your browser does not support camera access. Use Chrome or Safari on a phone.");
-      return;
-    }
-
-    // Small delay so React has painted the div into the DOM
-    setTimeout(function() {
-      var el = document.getElementById(uid.current);
-      if (!el) {
-        setStatus("error");
-        setErrorMsg("Scanner element not found. Please close and try again.");
-        return;
-      }
-
-      try {
-        var scanner = new Html5Qrcode(uid.current);
-        instanceRef.current = scanner;
-
-        scanner.start(
-          { facingMode: "environment" },
-          { fps: 10, qrbox: { width: 260, height: 130 }, aspectRatio: 1.777 },
-          function(decodedText) {
-            stopScanner();
-            onScan(decodedText);
-          },
-          function() { /* per-frame misses — ignore */ }
-        ).then(function() {
-          setStatus("scanning");
-        }).catch(function(err) {
-          var msg = String(err || "");
-          if (msg.toLowerCase().includes("permission") || msg.toLowerCase().includes("denied")) {
-            setErrorMsg("Camera permission denied. Tap the camera icon in your browser address bar and allow access, then retry.");
-          } else if (msg.toLowerCase().includes("https") || msg.toLowerCase().includes("secure")) {
-            setErrorMsg("Camera requires a secure (HTTPS) connection. Make sure you're on https://");
-          } else if (msg.toLowerCase().includes("notfound") || msg.toLowerCase().includes("no camera")) {
-            setErrorMsg("No camera found on this device.");
-          } else {
-            setErrorMsg("Could not start camera: " + (msg || "unknown error") + ". Try closing other apps using the camera.");
-          }
-          setStatus("error");
-        });
-      } catch(e) {
-        setStatus("error");
-        setErrorMsg("Scanner failed to initialise: " + String(e.message || e));
-      }
-    }, 120);
-  }, [onScan, stopScanner]);
-
-  useEffect(function() {
-    startScanner();
-    return stopScanner;
-  }, []);
-
-  return (
-    <div className="fixed inset-0 bg-black z-50 flex flex-col">
-      {/* Header */}
-      <div className="flex items-center justify-between p-4 bg-zinc-950 border-b border-zinc-800">
+    <div className="fixed inset-0 bg-black/90 z-50 flex flex-col">
+      <div className="flex items-center justify-between p-4 bg-black">
         <div>
           <h3 className="text-sm font-bold text-white">Barcode Scanner</h3>
-          <p className="text-xs text-zinc-400">
-            {status === "scanning" ? "📷 Point camera at barcode" :
-             status === "error"    ? "⚠ Scanner error" :
-                                     "Starting camera..."}
-          </p>
+          <p className="text-xs text-zinc-400">{scanning ? "Point at barcode" : "Starting camera..."}</p>
         </div>
-        <button onClick={function() { stopScanner(); onClose(); }}
-          className="w-10 h-10 rounded-full bg-zinc-800 flex items-center justify-center text-zinc-300 text-lg">✕</button>
+        <button onClick={function() { if(html5QrcodeRef.current) { try{html5QrcodeRef.current.stop();}catch(e){} } onClose(); }}
+          className="w-10 h-10 rounded-full bg-zinc-800 flex items-center justify-center text-zinc-300">✕</button>
       </div>
-
-      {/* Camera viewport — the div Html5Qrcode renders into */}
-      <div className="flex-1 flex items-center justify-center bg-black overflow-hidden">
-        <div id={uid.current} style={{width:"100%", maxWidth:"500px"}} />
+      <div className="flex-1 flex items-center justify-center bg-black">
+        <div id="barcode-reader" style={{width:"100%",maxWidth:"500px"}}></div>
       </div>
-
-      {/* Status bar */}
-      {status === "starting" && (
-        <div className="p-4 bg-zinc-900 border-t border-zinc-800 flex items-center justify-center gap-3">
-          <div className="w-5 h-5 border-2 border-cyan-500 border-t-transparent rounded-full animate-spin" />
-          <p className="text-sm text-zinc-400">Requesting camera permission...</p>
-        </div>
-      )}
-
-      {status === "scanning" && (
-        <div className="p-4 bg-zinc-900 border-t border-zinc-800 text-center">
-          <p className="text-xs text-zinc-500">Hold steady — scanner will beep when it reads a barcode</p>
-        </div>
-      )}
-
-      {status === "error" && (
-        <div className="p-4 bg-red-950/60 border-t border-red-500/30 space-y-3">
-          <p className="text-sm text-red-300 text-center leading-relaxed">{errorMsg}</p>
-          <div className="flex gap-2">
-            <button onClick={function() { stopScanner(); startScanner(); }}
-              className="flex-1 py-2.5 rounded-xl bg-cyan-500/20 text-cyan-400 font-bold text-sm border border-cyan-500/30 active:scale-95 transition-all">
-              ↻ Retry
-            </button>
-            <button onClick={function() { stopScanner(); onClose(); }}
-              className="flex-1 py-2.5 rounded-xl bg-zinc-800 text-zinc-300 font-medium text-sm active:scale-95 transition-all">
-              Close
-            </button>
-          </div>
+      {error && (
+        <div className="p-4 bg-red-500/10 border-t border-red-500/30 text-center">
+          <p className="text-sm text-red-400">{error}</p>
+          <button onClick={onClose} className="mt-2 px-4 py-2 bg-zinc-800 text-zinc-300 rounded-lg text-sm">Close</button>
         </div>
       )}
     </div>
@@ -1327,26 +969,9 @@ function POSScreen({ products, cart, setCart, onComplete }) {
   const [variantModal, setVariantModal] = useState(null);
   const [showCamera, setShowCamera] = useState(false);
   const [showBarcodeScanner, setShowBarcodeScanner] = useState(false);
-  const [notFoundMsg, setNotFoundMsg] = useState(""); // FIX: replace alert() with inline message
-  const [favourites, setFavourites] = useState(() => {
-    try { return JSON.parse(localStorage.getItem("fav_products") || "[]"); } catch { return []; }
-  });
-  const toggleFavourite = (id) => {
-    setFavourites(prev => {
-      const updated = prev.includes(id) ? prev.filter(f => f !== id) : [...prev, id];
-      localStorage.setItem("fav_products", JSON.stringify(updated));
-      return updated;
-    });
-  };
-
-  // FIX: compute categories dynamically from actual loaded products (not static MOCK_PRODUCTS)
-  const allCategories = React.useMemo(
-    () => ["All", "Favourites", ...new Set(products.map(p => p.category))],
-    [products]
-  );
+  const [favourites] = useState(["W001", "PC01", "W003", "PC05", "V002", "V004"]);
 
   const addBarcodeProduct = useCallback((product) => {
-    playBeep("add"); // 🔔 beep: item added to cart
     setCart(prev => {
       const key = product.id;
       const exists = prev.find(c => c.cartKey === key);
@@ -1356,14 +981,12 @@ function POSScreen({ products, cart, setCart, onComplete }) {
   }, [setCart]);
 
   const addWeightProduct = (product, weight, total) => {
-    playBeep("add");
     const key = `${product.id}_${Date.now()}`;
     setCart(prev => [...prev, { cartKey: key, id: product.id, name: `${product.name} (${weight}kg)`, image: product.image, qty: 1, unitPrice: total, lineTotal: total, unit: `${weight}kg`, type: "weight", weight, cost: product.cost * weight }]);
     setWeightModal(null);
   };
 
   const addPieceProduct = (product, count, total) => {
-    playBeep("add");
     setCart(prev => {
       const key = product.id;
       const exists = prev.find(c => c.cartKey === key);
@@ -1374,7 +997,6 @@ function POSScreen({ products, cart, setCart, onComplete }) {
   };
 
   const addVariantProduct = (product, variantIdx, qty, total) => {
-    playBeep("add");
     const variant = product.variants[variantIdx];
     const key = `${product.id}_v${variantIdx}`;
     setCart(prev => {
@@ -1409,18 +1031,18 @@ function POSScreen({ products, cart, setCart, onComplete }) {
   const handleBarcodeScan = () => {
     if (!barcodeInput.trim()) return;
     const query = barcodeInput.trim();
+    // Try barcode match first
     let found = products.find(p => p.barcode && p.barcode === query);
+    // Then try product ID match
     if (!found) found = products.find(p => p.id.toLowerCase() === query.toLowerCase());
+    // Then try name match
     if (!found) found = products.find(p => p.name.toLowerCase().includes(query.toLowerCase()));
     if (found) {
-      playBeep("success"); // ✅ beep: product found
       handleProductTap(found);
       setBarcodeInput("");
-      setNotFoundMsg("");
     } else {
-      playBeep("error"); // ❌ beep: not found
-      setNotFoundMsg(`"${query}" not found in products`);
-      setTimeout(() => setNotFoundMsg(""), 3000);
+      // Flash the input red briefly to indicate not found
+      alert("Product not found: " + query);
     }
   };
 
@@ -1455,7 +1077,7 @@ function POSScreen({ products, cart, setCart, onComplete }) {
             </span>
             <input type="text" value={barcodeInput} onChange={e => setBarcodeInput(e.target.value)}
               onKeyDown={e => e.key === "Enter" && handleBarcodeScan()} placeholder="Scan barcode..."
-              className={`w-full bg-zinc-800/80 border rounded-xl pl-11 pr-4 py-3 text-zinc-100 placeholder-zinc-500 focus:outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-500/20 transition-all font-mono ${notFoundMsg ? "border-red-500/60" : "border-amber-500/30"}`} />
+              className="w-full bg-zinc-800/80 border border-amber-500/30 rounded-xl pl-11 pr-4 py-3 text-zinc-100 placeholder-zinc-500 focus:outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-500/20 transition-all font-mono" />
           </div>
           <button onClick={handleBarcodeScan} className="px-3 bg-amber-500 text-zinc-900 rounded-xl font-bold hover:bg-amber-400 active:scale-95 transition-all shadow-lg shadow-amber-500/20 text-sm">Go</button>
           <button onClick={function(){setShowBarcodeScanner(true);}} className="px-3 bg-gradient-to-br from-cyan-500 to-blue-600 text-white rounded-xl font-bold hover:from-cyan-400 active:scale-95 transition-all shadow-lg shadow-cyan-500/20 flex items-center gap-1 text-sm" title="Scan Barcode">
@@ -1466,10 +1088,6 @@ function POSScreen({ products, cart, setCart, onComplete }) {
             <span className="text-xs">AI</span>
           </button>
         </div>
-        {/* FIX: inline not-found error (replaces blocking alert) */}
-        {notFoundMsg && (
-          <p className="mt-1.5 text-xs text-red-400 font-medium px-1">⚠ {notFoundMsg}</p>
-        )}
       </div>
 
       <div className="px-4 pb-2">
@@ -1478,7 +1096,7 @@ function POSScreen({ products, cart, setCart, onComplete }) {
 
       <div className="px-4 pb-2 overflow-x-auto">
         <div className="flex gap-2 min-w-max">
-          {allCategories.map(cat => (
+          {ALL_CATEGORIES.map(cat => (
             <button key={cat} onClick={() => setActiveCategory(cat)}
               className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all whitespace-nowrap ${
                 activeCategory === cat
@@ -1506,12 +1124,7 @@ function POSScreen({ products, cart, setCart, onComplete }) {
                 }`}>
                 <span className={`absolute top-1.5 left-1.5 px-1.5 py-0.5 rounded-md text-xs font-semibold border ${typeInfo.color}`} style={{ fontSize: "9px" }}>{typeInfo.icon}</span>
                 {inCart && <span className="absolute -top-1.5 -right-1.5 bg-amber-500 text-zinc-900 text-xs font-bold rounded-full w-5 h-5 flex items-center justify-center shadow">{inCart.qty}</span>}
-                <button onClick={e => { e.stopPropagation(); toggleFavourite(p.id); }}
-                  className="absolute top-1 right-1 text-xs leading-none"
-                  style={{ fontSize: "13px" }}>
-                  {favourites.includes(p.id) ? "⭐" : "☆"}
-                </button>
-                <span className="text-2xl mb-1 mt-3">{p.image}</span>
+                <span className="text-2xl mb-1 mt-1">{p.image}</span>
                 <span className="text-xs text-zinc-300 text-center leading-tight line-clamp-2 font-medium">{p.name}</span>
                 <span className="text-xs text-amber-400 font-bold mt-0.5">{priceDisplay}</span>
               </button>
@@ -1525,7 +1138,7 @@ function POSScreen({ products, cart, setCart, onComplete }) {
 
       {cart.length > 0 && (
         <div className="border-t border-zinc-800 bg-zinc-900/95 backdrop-blur-sm">
-          <div className="max-h-52 overflow-y-auto px-4 pt-3">
+          <div className="max-h-36 overflow-y-auto px-4 pt-3">
             {cart.map(item => (
               <div key={item.cartKey} className="flex items-center gap-2 mb-2 bg-zinc-800/50 rounded-xl px-3 py-2">
                 <span className="text-base">{item.image}</span>
@@ -1558,7 +1171,7 @@ function POSScreen({ products, cart, setCart, onComplete }) {
         </div>
       )}
 
-      {showBarcodeScanner && <BarcodeScannerModal onScan={function(code) { setShowBarcodeScanner(false); setBarcodeInput(code); var found = products.find(function(p){return p.barcode && p.barcode === code;}); if(found){ playBeep("success"); handleProductTap(found); } else { playBeep("error"); setNotFoundMsg("Scanned: " + code + " — not found. Add it in Stock tab."); setTimeout(function(){ setNotFoundMsg(""); }, 4000); } }} onClose={function(){setShowBarcodeScanner(false);}} />}
+      {showBarcodeScanner && <BarcodeScannerModal onScan={function(code) { setShowBarcodeScanner(false); setBarcodeInput(code); var found = products.find(function(p){return p.barcode && p.barcode === code;}); if(found){handleProductTap(found);} else {alert("Scanned: " + code + " — not found in products. Add it in Stock tab.");} }} onClose={function(){setShowBarcodeScanner(false);}} />}
       {weightModal && <WeightEntryModal product={weightModal} onAdd={(w, t) => addWeightProduct(weightModal, w, t)} onClose={() => setWeightModal(null)} />}
       {pieceModal && <PieceEntryModal product={pieceModal} onAdd={(c, t) => addPieceProduct(pieceModal, c, t)} onClose={() => setPieceModal(null)} />}
       {variantModal && <VariantModal product={variantModal} onAdd={(vi, q, t) => addVariantProduct(variantModal, vi, q, t)} onClose={() => setVariantModal(null)} />}
@@ -1567,567 +1180,405 @@ function POSScreen({ products, cart, setCart, onComplete }) {
   );
 }
 
-function InventoryScreen({ products, setProducts }) {
+function ProductFormModal({ initial, onSave, onDelete, onClose, title }) {
+  const emptyForm = {name:"",brand:"",type:"barcode",category:"General",price:"",cost:"",stock:"",barcode:"",unit:"pc",image:"📦",pricePerKg:"",pricePerPiece:"",unitDesc:"",lastPurchaseDate:""};
+  const [fp, setFp] = useState(initial ? {...emptyForm, ...initial, cost: initial.cost || "", lastPurchaseDate: initial.lastPurchaseDate || "", unitDesc: initial.unitDesc || ""} : emptyForm);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+
+  const salePrice = fp.type === "weight" ? Number(fp.pricePerKg) : fp.type === "piece" ? Number(fp.pricePerPiece) : Number(fp.price);
+  const margin = salePrice > 0 && Number(fp.cost) > 0 ? Math.round(((salePrice - Number(fp.cost)) / salePrice) * 100) : null;
+
+  const handleSave = () => {
+    if (!fp.name.trim()) return;
+    const prefix = fp.type === "weight" ? "W" : fp.type === "piece" ? "PC" : "P";
+    const saved = {
+      id: initial ? initial.id : prefix + String(Date.now()).slice(-4),
+      type: fp.type, barcode: fp.barcode || "",
+      name: fp.name, brand: fp.brand || "", category: fp.category || "General",
+      cost: Number(fp.cost) || 0, stock: Number(fp.stock) || 0,
+      unit: fp.type === "weight" ? "kg" : fp.type === "piece" ? "pcs" : "pc",
+      unitDesc: fp.unitDesc || "",
+      lastPurchaseDate: fp.lastPurchaseDate || "",
+      image: fp.image || "📦"
+    };
+    if (fp.type === "barcode") saved.price = Number(fp.price) || 0;
+    if (fp.type === "weight") { saved.pricePerKg = Number(fp.pricePerKg) || 0; saved.minWeight = 0.25; saved.weightStep = 0.25; }
+    if (fp.type === "piece") saved.pricePerPiece = Number(fp.pricePerPiece) || 0;
+    if (initial && initial.variants) saved.variants = initial.variants;
+    onSave(saved);
+  };
+
+  const emojis = ["📦","🥤","🍞","🧴","🧼","🪥","🍪","🍺","🥛","🍚","🌾","🥔","🫘","🌽","🥜","🧅","🍅","🥚","🌯","🍩","🫓","🍌","🧈","🫗","🧂","🧹","🧻","🧽","🫙","🛢️"];
+
+  const inp = "w-full bg-zinc-900 border border-zinc-700 rounded-xl px-3 py-2.5 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-amber-500 transition-colors";
+  const lbl = "text-xs font-medium text-zinc-400 mb-1 block";
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end" onClick={e => { if(e.target === e.currentTarget) onClose(); }}>
+      <div className="w-full bg-zinc-900 border-t border-zinc-700/60 rounded-t-3xl max-h-[90vh] overflow-y-auto">
+        {/* Handle */}
+        <div className="flex justify-center pt-3 pb-1"><div className="w-10 h-1 bg-zinc-600 rounded-full" /></div>
+
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-3 border-b border-zinc-800">
+          <h2 className="text-base font-bold text-zinc-100" style={{fontFamily:"'DM Sans',sans-serif"}}>{title}</h2>
+          <button onClick={onClose} className="w-8 h-8 rounded-full bg-zinc-800 flex items-center justify-center text-zinc-400 hover:text-zinc-200">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+        </div>
+
+        <div className="px-5 py-4 space-y-4">
+          {/* Image picker */}
+          <div>
+            <label className={lbl}>Product Icon</label>
+            <div className="flex gap-1 flex-wrap bg-zinc-800/50 rounded-xl p-2">
+              {emojis.map(em => (
+                <button key={em} onClick={() => setFp({...fp, image: em})}
+                  className={`w-9 h-9 rounded-lg text-xl flex items-center justify-center transition-all ${fp.image === em ? "bg-amber-500/30 border-2 border-amber-500 scale-110" : "hover:bg-zinc-700"}`}>
+                  {em}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Product Name */}
+          <div>
+            <label className={lbl}>Product Name *</label>
+            <input type="text" value={fp.name} onChange={e => setFp({...fp, name: e.target.value})} placeholder="e.g. Mukwano Laundry Soap" className={inp} />
+          </div>
+
+          {/* Brand */}
+          <div>
+            <label className={lbl}>Brand</label>
+            <input type="text" value={fp.brand} onChange={e => setFp({...fp, brand: e.target.value})} placeholder="e.g. Mukwano, Rwenzori, Nile" className={inp} />
+          </div>
+
+          {/* Type + Category row */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className={lbl}>Product Type</label>
+              <select value={fp.type} onChange={e => setFp({...fp, type: e.target.value})} className={inp}>
+                <option value="barcode">📦 Barcoded</option>
+                <option value="weight">⚖️ By Weight</option>
+                <option value="piece">🔢 By Piece</option>
+              </select>
+            </div>
+            <div>
+              <label className={lbl}>Category</label>
+              <input type="text" value={fp.category} onChange={e => setFp({...fp, category: e.target.value})} placeholder="e.g. Soap, Grocery" className={inp} />
+            </div>
+          </div>
+
+          {/* Barcode row */}
+          <div>
+            <label className={lbl}>Barcode Number</label>
+            <div className="flex gap-2">
+              <input type="text" value={fp.barcode} onChange={e => setFp({...fp, barcode: e.target.value})} placeholder="Scan or type barcode" className={inp} />
+              <button type="button" onClick={function(){
+                try {
+                  var sc = new Html5Qrcode("inv-bc-reader");
+                  var div = document.createElement("div"); div.id = "inv-bc-reader"; div.style.cssText = "position:fixed;inset:0;z-index:9999;background:black;";
+                  var closeBtn = document.createElement("button"); closeBtn.textContent = "✕ Close"; closeBtn.style.cssText = "position:fixed;top:16px;right:16px;z-index:10000;background:#f59e0b;color:#000;border:none;padding:10px 20px;border-radius:12px;font-size:15px;font-weight:bold;";
+                  closeBtn.onclick = function(){ try{sc.stop();}catch(e){} document.body.removeChild(div); document.body.removeChild(closeBtn); };
+                  document.body.appendChild(div); document.body.appendChild(closeBtn);
+                  sc.start({facingMode:"environment"},{fps:10,qrbox:{width:280,height:150}},function(code){
+                    try{sc.stop();}catch(e){} document.body.removeChild(div); document.body.removeChild(closeBtn);
+                    setFp(function(prev){return Object.assign({},prev,{barcode:code});});
+                  },function(){}).catch(function(e){ document.body.removeChild(div); document.body.removeChild(closeBtn); alert("Camera error"); });
+                }catch(e){alert("Scanner not available");}
+              }} className="flex-shrink-0 px-4 bg-cyan-500/20 border border-cyan-500/40 text-cyan-400 rounded-xl font-bold text-sm active:scale-95 flex items-center gap-1.5 whitespace-nowrap">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M3 7V5a2 2 0 012-2h2M17 3h2a2 2 0 012 2v2M21 17v2a2 2 0 01-2 2h-2M7 21H5a2 2 0 01-2-2v-2"/><line x1="7" y1="12" x2="17" y2="12"/></svg>
+                Scan
+              </button>
+            </div>
+          </div>
+
+          {/* Pricing */}
+          <div className="bg-zinc-800/50 rounded-xl p-4 space-y-3">
+            <p className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Pricing</p>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className={lbl}>
+                  {fp.type === "weight" ? "Sale Price / Kg (UGX)" : fp.type === "piece" ? "Sale Price / Piece (UGX)" : "Sale Price (UGX)"}
+                </label>
+                {fp.type === "barcode" && <input type="number" value={fp.price} onChange={e => setFp({...fp, price: e.target.value})} placeholder="0" className={inp} />}
+                {fp.type === "weight" && <input type="number" value={fp.pricePerKg} onChange={e => setFp({...fp, pricePerKg: e.target.value})} placeholder="0" className={inp} />}
+                {fp.type === "piece" && <input type="number" value={fp.pricePerPiece} onChange={e => setFp({...fp, pricePerPiece: e.target.value})} placeholder="0" className={inp} />}
+              </div>
+              <div>
+                <label className={lbl}>Purchase Price (UGX)</label>
+                <input type="number" value={fp.cost} onChange={e => setFp({...fp, cost: e.target.value})} placeholder="0" className={inp} />
+              </div>
+            </div>
+            {margin !== null && (
+              <div className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium ${margin >= 20 ? "bg-emerald-500/10 text-emerald-400" : margin >= 5 ? "bg-amber-500/10 text-amber-400" : "bg-red-500/10 text-red-400"}`}>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg>
+                Margin: {margin}% {margin >= 20 ? "✓ Good" : margin >= 5 ? "— Low" : "✗ Very low"}
+              </div>
+            )}
+          </div>
+
+          {/* Stock + Unit Description */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className={lbl}>Stock Quantity</label>
+              <input type="number" value={fp.stock} onChange={e => setFp({...fp, stock: e.target.value})} placeholder="0" className={inp} />
+            </div>
+            <div>
+              <label className={lbl}>Unit Description</label>
+              <input type="text" value={fp.unitDesc} onChange={e => setFp({...fp, unitDesc: e.target.value})} placeholder="e.g. 500g, 500ml, 1kg" className={inp} />
+            </div>
+          </div>
+
+          {/* Last Purchase Date */}
+          <div>
+            <label className={lbl}>Last Purchase Date</label>
+            <input type="date" value={fp.lastPurchaseDate} onChange={e => setFp({...fp, lastPurchaseDate: e.target.value})} className={inp} />
+          </div>
+
+          {/* Actions */}
+          <div className="flex gap-3 pt-2">
+            <button onClick={onClose} className="flex-1 py-3.5 rounded-xl bg-zinc-800 border border-zinc-700 text-zinc-300 font-medium text-sm active:scale-95 transition-all">
+              Cancel
+            </button>
+            <button onClick={handleSave} disabled={!fp.name.trim()} className="flex-1 py-3.5 rounded-xl bg-amber-500 text-zinc-900 font-bold text-sm active:scale-95 disabled:opacity-40 transition-all shadow-lg shadow-amber-500/20">
+              {initial ? "Save Changes" : "Add Product"}
+            </button>
+          </div>
+
+          {/* Delete — only shown when editing */}
+          {initial && onDelete && !confirmDelete && (
+            <button onClick={() => setConfirmDelete(true)} className="w-full py-3 rounded-xl border border-red-500/30 text-red-400 text-sm font-medium active:scale-95 transition-all flex items-center justify-center gap-2 mb-4">
+              <svg width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/><path d="M10 11v6M14 11v6"/></svg>
+              Delete this product
+            </button>
+          )}
+          {confirmDelete && (
+            <div className="mb-4 bg-red-500/10 border border-red-500/30 rounded-xl p-4">
+              <p className="text-sm text-red-300 font-medium text-center mb-3">Are you sure? This cannot be undone.</p>
+              <div className="flex gap-2">
+                <button onClick={() => setConfirmDelete(false)} className="flex-1 py-2.5 rounded-lg bg-zinc-800 text-zinc-300 text-sm font-medium">Cancel</button>
+                <button onClick={() => onDelete(initial.id)} className="flex-1 py-2.5 rounded-lg bg-red-600 text-white text-sm font-bold">Delete</button>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function InventoryScreen({ products, setProducts, autoOpenAdd, onAddOpened }) {
   const [search, setSearch] = useState("");
   const [filterType, setFilterType] = useState("all");
-  const [sortBy, setSortBy] = useState("name");
-  const [editingId, setEditingId] = useState(null);
-  const [editValue, setEditValue] = useState("");
   const [showAddForm, setShowAddForm] = useState(false);
-  const [showInvScanner, setShowInvScanner] = useState(false); // ✅ proper modal state
-  const [showAISnap, setShowAISnap] = useState(false); // ✅ AI snap for add form
-  const [np, setNp] = useState({name:"",type:"barcode",category:"General",price:"",cost:"",stock:"",barcode:"",unit:"pc",image:"📦",pricePerKg:"",pricePerPiece:"",qtyPacks:"",qtyPerPack:""});
+  const [editingProduct, setEditingProduct] = useState(null);
+
+  useEffect(() => {
+    if (autoOpenAdd) {
+      setShowAddForm(true);
+      if (onAddOpened) onAddOpened();
+    }
+  }, [autoOpenAdd]);
 
   const getStock = (p) => p.type === "variant" ? p.variants.reduce((s, v) => s + v.stock, 0) : (p.stock || 0);
   const getPrice = (p) => p.type === "weight" ? p.pricePerKg : p.type === "piece" ? p.pricePerPiece : p.type === "variant" ? (p.variants && p.variants[0] ? p.variants[0].price : 0) : p.price;
 
   const filtered = products
     .filter(p => filterType === "all" || p.type === filterType)
-    .filter(p => p.name.toLowerCase().includes(search.toLowerCase()))
-    .sort((a, b) => sortBy === "name" ? a.name.localeCompare(b.name) : sortBy === "stock-low" ? getStock(a) - getStock(b) : getPrice(b) - getPrice(a));
+    .filter(p => {
+      const q = search.toLowerCase();
+      return p.name.toLowerCase().includes(q) || (p.brand && p.brand.toLowerCase().includes(q)) || (p.barcode && p.barcode.includes(q)) || (p.category && p.category.toLowerCase().includes(q));
+    })
+    .sort((a, b) => a.name.localeCompare(b.name));
 
-  const lowStockCount = products.filter(p => getStock(p) <= 10).length;
-  const totalValue = products.reduce((s, p) => s + getPrice(p) * getStock(p), 0);
-
-  const handleStockSave = (id) => {
-    const val = parseInt(editValue);
-    if (!isNaN(val) && val >= 0 && setProducts) {
-      playBeep("add");
-      setProducts(prev => {
-        const updated = prev.map(p => {
-          if (p.id !== id) return p;
-          if (p.type === "variant") {
-            const perVariant = Math.floor(val / p.variants.length);
-            const remainder = val % p.variants.length;
-            return { ...p, variants: p.variants.map((v, i) => ({ ...v, stock: perVariant + (i === 0 ? remainder : 0) })) };
-          }
-          return { ...p, stock: val };
-        });
-        const changed = updated.find(p => p.id === id);
-        if (changed) {
-          dbPut("products", changed).catch(() => {});
-          // Sync to sheet
-          api.post("updateStock", { productId: id, stock: val, absolute: true }).catch(() => {});
-        }
-        return updated;
-      });
-    }
-    setEditingId(null); setEditValue("");
-  };
-
-  const handleAddProduct = async () => {
-    if (!np.name.trim() || !setProducts) return;
-    playBeep("success");
-    const prefix = np.type === "weight" ? "W" : np.type === "piece" ? "PC" : "P";
-    const newP = {
-      id: prefix + String(Date.now()).slice(-4), type: np.type, barcode: np.barcode || "",
-      name: np.name, category: np.category || "General", cost: Number(np.cost) || 0,
-      stock: Number(np.stock) || 0, unit: np.unit || (np.type === "weight" ? "kg" : np.type === "piece" ? "pcs" : "pc"),
-      image: np.image || "📦"
-    };
-    if (np.type === "barcode") newP.price = Number(np.price) || 0;
-    if (np.type === "weight") { newP.pricePerKg = Number(np.pricePerKg) || 0; newP.minWeight = 0.25; newP.weightStep = 0.25; }
-    if (np.type === "piece") newP.pricePerPiece = Number(np.pricePerPiece) || 0;
-    // Save locally first
-    setProducts(prev => [...prev, newP]);
-    dbPut("products", newP).catch(() => {});
-    // Then sync to Google Sheet in background
-    api.post("addProduct", newP).catch(() => {});
-    setNp({name:"",type:"barcode",category:"General",price:"",cost:"",stock:"",barcode:"",unit:"pc",image:"📦",pricePerKg:"",pricePerPiece:"",qtyPacks:"",qtyPerPack:""});
+  const handleAdd = async (saved) => {
+    if (setProducts) setProducts(prev => [...prev, saved]);
     setShowAddForm(false);
+    // Persist to Google Sheets if API is configured
+    if (api.isConfigured()) {
+      try { await api.post('addProduct', { ...saved, deviceId: DEVICE_ID }); }
+      catch(e) { console.warn('addProduct sync failed:', e); }
+    }
   };
 
-  const emojis = ["📦","🥤","🍞","🧴","🧼","🪥","🍪","🍺","🥛","🍚","🌾","🥔","🫘","🌽","🥜","🧅","🍅","🥚","🌯","🍩","🫓","🍌","🧈","🫗","🧂","🧹"];
-
-  const [editProduct, setEditProduct] = useState(null); // product being edited
-  const [deleteConfirm, setDeleteConfirm] = useState(null); // product id to delete
-
-  const handleDeleteProduct = (id) => {
-    setProducts(prev => {
-      const updated = prev.filter(p => p.id !== id);
-      dbDelete("products", id).catch(() => {});
-      api.post("deleteProduct", { productId: id }).catch(() => {});
-      return updated;
-    });
-    setDeleteConfirm(null);
+  const handleEdit = async (saved) => {
+    if (setProducts) setProducts(prev => prev.map(p => p.id === saved.id ? saved : p));
+    setEditingProduct(null);
+    // Persist to Google Sheets if API is configured
+    if (api.isConfigured()) {
+      try { await api.post('updateProduct', { ...saved, productId: saved.id, deviceId: DEVICE_ID }); }
+      catch(e) { console.warn('updateProduct sync failed:', e); }
+    }
   };
 
-  const handleEditSave = () => {
-    if (!editProduct || !editProduct.name.trim()) return;
-    setProducts(prev => {
-      const updated = prev.map(p => p.id === editProduct.id ? editProduct : p);
-      dbPut("products", editProduct).catch(() => {});
-      api.post("updateProduct", { productId: editProduct.id, ...editProduct }).catch(() => {});
-      return updated;
-    });
-    setEditProduct(null);
-    playBeep("success");
+  const handleDelete = async (id) => {
+    if (setProducts) setProducts(prev => prev.filter(p => p.id !== id));
+    // Persist to Google Sheets if API is configured
+    if (api.isConfigured()) {
+      try { await api.post('deleteProduct', { productId: id, deviceId: DEVICE_ID }); }
+      catch(e) { console.warn('deleteProduct sync failed:', e); }
+    }
   };
+
+  const filterOptions = [
+    { id: "all", label: "All Items" },
+    { id: "barcode", label: "Barcoded" },
+    { id: "weight", label: "By Weight" },
+    { id: "piece", label: "By Piece" },
+    { id: "variant", label: "Variants" },
+  ];
 
   return (
-    <div className="flex flex-col h-full">
-      <div className="px-4 pt-4 pb-2 grid grid-cols-3 gap-2">
-        <div className="bg-zinc-800/60 rounded-xl p-3 border border-zinc-700/30">
-          <p className="text-xs text-zinc-500">Products</p>
-          <p className="text-xl font-bold text-zinc-100">{products.length}</p>
+    <div className="flex flex-col h-full bg-zinc-950">
+      {/* Top bar */}
+      <div className="px-4 pt-4 pb-3 border-b border-zinc-800/60">
+        <h2 className="text-lg font-bold text-zinc-100 mb-3" style={{fontFamily:"'DM Sans',sans-serif"}}>Inventory List</h2>
+
+        {/* Search */}
+        <div className="relative mb-3">
+          <svg className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          <input
+            type="text" value={search} onChange={e => setSearch(e.target.value)}
+            placeholder="Search products..."
+            className="w-full bg-zinc-800/70 border border-zinc-700/50 rounded-xl pl-9 pr-4 py-2.5 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-amber-500/60 transition-colors"
+          />
         </div>
-        <div className="bg-zinc-800/60 rounded-xl p-3 border border-zinc-700/30">
-          <p className="text-xs text-zinc-500">Stock Value</p>
-          <p className="text-lg font-bold text-amber-400">{(totalValue / 1000000).toFixed(1)}M</p>
-        </div>
-        <div className={`rounded-xl p-3 border ${lowStockCount > 0 ? "bg-red-500/10 border-red-500/20" : "bg-emerald-500/10 border-emerald-500/20"}`}>
-          <p className="text-xs text-zinc-500">Low Stock</p>
-          <p className={`text-xl font-bold ${lowStockCount > 0 ? "text-red-400" : "text-emerald-400"}`}>{lowStockCount}</p>
-        </div>
-      </div>
 
-      <div className="px-4 py-2 flex gap-2">
-        <div className="flex-1"><SearchInput value={search} onChange={setSearch} placeholder="Search inventory..." /></div>
-        <button onClick={() => setShowAddForm(!showAddForm)} className="px-3 bg-amber-500 text-zinc-900 rounded-xl font-bold hover:bg-amber-400 active:scale-95 transition-all text-sm">+ Add</button>
-        <select value={sortBy} onChange={e => setSortBy(e.target.value)} className="bg-zinc-800 border border-zinc-700/50 rounded-xl px-2 py-2 text-xs text-zinc-300 focus:outline-none">
-          <option value="name">A-Z</option><option value="stock-low">Stock ↑</option><option value="price">Price ↓</option>
-        </select>
-      </div>
-
-      {showAddForm && (
-        <div className="fixed inset-0 z-50 bg-black/70 flex flex-col justify-end" onClick={e => { if(e.target === e.currentTarget) setShowAddForm(false); }}>
-          <div className="bg-zinc-900 rounded-t-2xl max-h-[92vh] flex flex-col">
-
-            {/* Header */}
-            <div className="flex items-center justify-between px-5 pt-5 pb-4 border-b border-zinc-800 flex-shrink-0">
-              <div>
-                <h3 className="text-base font-bold text-zinc-100">Add New Product</h3>
-                <p className="text-xs text-zinc-500 mt-0.5">Fill in the details below</p>
-              </div>
-              <button onClick={() => setShowAISnap(true)}
-                className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-violet-500/15 border border-violet-500/30 text-violet-300 text-xs font-bold active:scale-95 transition-all">
-                🤖 AI Snap
-              </button>
-            </div>
-
-            {/* Body */}
-            <div className="overflow-y-auto flex-1 px-5 py-4 space-y-5">
-
-              {np.aiEstimate && (
-                <div className="flex items-center gap-2 bg-violet-500/10 border border-violet-500/30 rounded-xl px-3 py-2.5">
-                  <span className="text-violet-400">🤖</span>
-                  <p className="text-xs text-violet-300 flex-1">{np.aiEstimate}</p>
-                  <button onClick={() => setNp(prev => ({...prev, aiEstimate: ""}))} className="text-zinc-500 text-sm">✕</button>
-                </div>
-              )}
-
-              {/* SECTION 1: Basic Info */}
-              <div className="space-y-2">
-                <p className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Basic Info</p>
-                <input type="text" value={np.name} onChange={e => setNp({...np, name: e.target.value})}
-                  placeholder="Product name (e.g. Mukwano Soap)"
-                  className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500/20" />
-                <div className="grid grid-cols-2 gap-2">
-                  <select value={np.type} onChange={e => setNp({...np, type: e.target.value})}
-                    className="bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-3 text-sm text-zinc-200 focus:outline-none">
-                    <option value="barcode">📦 Barcoded</option>
-                    <option value="weight">⚖️ By Weight</option>
-                    <option value="piece">🔢 By Piece</option>
-                  </select>
-                  <input type="text" value={np.category} onChange={e => setNp({...np, category: e.target.value})}
-                    placeholder="Category"
-                    className="bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-3 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none" />
-                </div>
-                {/* Icon picker */}
-                <div>
-                  <p className="text-xs text-zinc-500 mb-2">Icon</p>
-                  <div className="flex gap-1.5 flex-wrap">
-                    {emojis.map(em => (
-                      <button key={em} onClick={() => setNp({...np, image: em})}
-                        className={`w-9 h-9 rounded-xl text-lg flex items-center justify-center transition-all ${np.image === em ? "bg-amber-500/25 border-2 border-amber-500/60 scale-110" : "bg-zinc-800 border border-zinc-700 hover:bg-zinc-700"}`}>{em}</button>
-                    ))}
-                  </div>
-                </div>
-              </div>
-
-              {/* SECTION 2: Pricing */}
-              <div className="space-y-2">
-                <p className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Pricing</p>
-                <div className="grid grid-cols-2 gap-2">
-                  {np.type === "barcode" && (
-                    <div className="space-y-1">
-                      <p className="text-xs text-zinc-500 pl-1">Selling Price</p>
-                      <input type="number" value={np.price} onChange={e => setNp({...np, price: e.target.value})}
-                        placeholder="UGX 0"
-                        className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-3 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-amber-500" />
-                    </div>
-                  )}
-                  {np.type === "weight" && (
-                    <div className="space-y-1">
-                      <p className="text-xs text-zinc-500 pl-1">Price per Kg</p>
-                      <input type="number" value={np.pricePerKg} onChange={e => setNp({...np, pricePerKg: e.target.value})}
-                        placeholder="UGX 0"
-                        className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-3 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-amber-500" />
-                    </div>
-                  )}
-                  {np.type === "piece" && (
-                    <div className="space-y-1">
-                      <p className="text-xs text-zinc-500 pl-1">Price per Piece</p>
-                      <input type="number" value={np.pricePerPiece} onChange={e => setNp({...np, pricePerPiece: e.target.value})}
-                        placeholder="UGX 0"
-                        className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-3 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-amber-500" />
-                    </div>
-                  )}
-                  <div className="space-y-1">
-                    <p className="text-xs text-zinc-500 pl-1">Cost / Buy Price</p>
-                    <input type="number" value={np.cost} onChange={e => setNp({...np, cost: e.target.value})}
-                      placeholder="UGX 0"
-                      className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-3 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none" />
-                  </div>
-                </div>
-              </div>
-
-              {/* SECTION 3: Stock */}
-              <div className="space-y-2">
-                <p className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Stock</p>
-
-                {/* Unit selector */}
-                <div>
-                  <p className="text-xs text-zinc-500 mb-2">Sold / measured in</p>
-                  <div className="flex flex-wrap gap-1.5">
-                    {["pc","pcs","kg","g","dozen","carton","bag","bottle","pack","tin","box","tray","litre","bundle","roll","pair","sack"].map(u => (
-                      <button key={u} type="button" onClick={() => setNp({...np, unit: u})}
-                        className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all ${np.unit === u ? "bg-amber-500/20 border-amber-500/50 text-amber-400" : "bg-zinc-800 border-zinc-700 text-zinc-500 hover:text-zinc-300"}`}>
-                        {u}
-                      </button>
-                    ))}
-                    <input type="text"
-                      value={!["pc","pcs","kg","g","dozen","carton","bag","bottle","pack","tin","box","tray","litre","bundle","roll","pair","sack"].includes(np.unit) ? np.unit : ""}
-                      onChange={e => setNp({...np, unit: e.target.value})}
-                      placeholder="other..."
-                      className="w-20 bg-zinc-800 border border-zinc-700 rounded-lg px-2 py-1.5 text-xs text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-amber-500" />
-                  </div>
-                </div>
-
-                {/* Quantity - direct or calculated */}
-                <div className="bg-zinc-800/50 border border-zinc-700/50 rounded-xl p-4 space-y-3">
-                  <div className="flex items-center gap-3">
-                    <div className="flex-1 space-y-1">
-                      <p className="text-xs text-zinc-500">Total in stock</p>
-                      <input type="number" value={np.stock}
-                        onChange={e => setNp({...np, stock: e.target.value, qtyPacks:"", qtyPerPack:""})}
-                        placeholder="e.g. 240"
-                        className="w-full bg-zinc-900 border border-zinc-700 rounded-xl px-3 py-2.5 text-sm font-bold text-amber-400 placeholder-zinc-600 focus:outline-none focus:border-amber-500" />
-                    </div>
-                    <div className="text-center pt-5">
-                      <p className="text-zinc-600 text-xs">or</p>
-                    </div>
-                    <div className="flex-1 space-y-1">
-                      <p className="text-xs text-zinc-500">Packs received</p>
-                      <input type="number" value={np.qtyPacks||""}
-                        onChange={e => { const p=e.target.value; const t=p&&np.qtyPerPack?String(Number(p)*Number(np.qtyPerPack)):""; setNp({...np,qtyPacks:p,stock:t}); }}
-                        placeholder="e.g. 10"
-                        className="w-full bg-zinc-900 border border-zinc-700 rounded-xl px-3 py-2.5 text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-cyan-500" />
-                    </div>
-                    <div className="pt-5 text-zinc-600 font-bold">×</div>
-                    <div className="flex-1 space-y-1">
-                      <p className="text-xs text-zinc-500">Per pack</p>
-                      <input type="number" value={np.qtyPerPack||""}
-                        onChange={e => { const pp=e.target.value; const t=np.qtyPacks&&pp?String(Number(np.qtyPacks)*Number(pp)):""; setNp({...np,qtyPerPack:pp,stock:t}); }}
-                        placeholder="e.g. 24"
-                        className="w-full bg-zinc-900 border border-zinc-700 rounded-xl px-3 py-2.5 text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-cyan-500" />
-                    </div>
-                  </div>
-                  {np.qtyPacks && np.qtyPerPack && np.stock ? (
-                    <div className="bg-amber-500/10 border border-amber-500/20 rounded-lg px-3 py-2 text-center">
-                      <p className="text-xs text-amber-400 font-semibold">
-                        {np.qtyPacks} packs × {np.qtyPerPack} {np.unit} = <span className="text-base font-bold">{np.stock} {np.unit}</span> total
-                      </p>
-                    </div>
-                  ) : (
-                    <p className="text-xs text-zinc-600 text-center">Enter total directly, or use packs × per-pack to calculate</p>
-                  )}
-                </div>
-              </div>
-
-              {/* SECTION 4: Barcode (optional) */}
-              <div className="space-y-2">
-                <p className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Barcode <span className="text-zinc-600 font-normal normal-case">(optional)</span></p>
-                <div className="flex gap-2">
-                  <input type="text" value={np.barcode} onChange={e => setNp({...np, barcode: e.target.value})}
-                    placeholder="Scan or type barcode number"
-                    className="flex-1 bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-amber-500" />
-                  <button type="button" onClick={() => setShowInvScanner(true)}
-                    className="px-4 bg-cyan-500/20 border border-cyan-500/40 text-cyan-400 rounded-xl font-bold text-sm active:scale-95 flex items-center gap-1.5">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 7V5a2 2 0 012-2h2M17 3h2a2 2 0 012 2v2M21 17v2a2 2 0 01-2 2h-2M7 21H5a2 2 0 01-2-2v-2"/><line x1="7" y1="12" x2="17" y2="12"/></svg>
-                    Scan
-                  </button>
-                </div>
-              </div>
-
-            </div>
-
-            {/* Footer */}
-            <div className="flex gap-3 px-5 py-4 border-t border-zinc-800 flex-shrink-0">
-              <button onClick={() => setShowAddForm(false)}
-                className="flex-1 py-3.5 rounded-xl bg-zinc-800 text-zinc-400 font-semibold text-sm active:scale-95 border border-zinc-700">
-                Cancel
-              </button>
-              <button onClick={handleAddProduct} disabled={!np.name.trim()}
-                className="flex-2 px-8 py-3.5 rounded-xl bg-amber-500 text-zinc-900 font-bold text-sm active:scale-95 disabled:opacity-40 shadow-lg shadow-amber-500/20">
-                Save Product
-              </button>
-            </div>
+        {/* Add button + filter dropdown */}
+        <div className="flex items-center gap-3">
+          <button onClick={() => setShowAddForm(true)}
+            className="flex items-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-bold text-sm active:scale-95 transition-all shadow-lg shadow-emerald-600/20">
+            <svg width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            Add
+          </button>
+          <div className="flex-1" />
+          <div className="relative">
+            <select value={filterType} onChange={e => setFilterType(e.target.value)}
+              className="appearance-none bg-zinc-800/70 border border-zinc-700/50 rounded-xl pl-3 pr-8 py-2.5 text-sm text-zinc-300 focus:outline-none focus:border-amber-500/60 cursor-pointer">
+              {filterOptions.map(o => <option key={o.id} value={o.id}>{o.label}</option>)}
+            </select>
+            <svg className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-400 pointer-events-none" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></svg>
           </div>
         </div>
-      )}
 
-      <div className="px-4 pb-2 flex gap-2 overflow-x-auto">
-        {[{ id: "all", label: "All", icon: "📋" }, { id: "barcode", label: "Barcoded", icon: "📦" }, { id: "weight", label: "By Weight", icon: "⚖️" }, { id: "piece", label: "By Piece", icon: "🔢" }, { id: "variant", label: "Variants", icon: "📐" }].map(t => (
-          <button key={t.id} onClick={() => setFilterType(t.id)}
-            className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all whitespace-nowrap flex items-center gap-1 ${
-              filterType === t.id ? "bg-amber-500/20 text-amber-400 border border-amber-500/30" : "bg-zinc-800/60 text-zinc-500 border border-zinc-700/30 hover:text-zinc-300"
-            }`}><span>{t.icon}</span> {t.label}</button>
-        ))}
+        {/* Total count */}
+        <p className="text-sm font-semibold text-zinc-300 mt-3">
+          Total <span className="text-emerald-400">({filtered.length})</span>
+        </p>
       </div>
 
-      <div className="flex-1 overflow-y-auto px-4 pb-4 space-y-2">
-        {filtered.map(p => {
-          const typeInfo = TYPE_LABELS[p.type];
+      {/* Product list */}
+      <div className="flex-1 overflow-y-auto px-4 py-3 space-y-2">
+        {filtered.length === 0 ? (
+          <div className="text-center py-16">
+            <span className="text-5xl block mb-3">📦</span>
+            <p className="text-zinc-400 font-medium">No products found</p>
+            <p className="text-zinc-600 text-sm mt-1">
+              {search ? "Try a different search term" : "Tap + Add to create your first product"}
+            </p>
+          </div>
+        ) : filtered.map(p => {
           const stock = getStock(p);
-          const isEditing = editingId === p.id;
+          const salePrice = getPrice(p);
+          const stockLow = stock <= 5;
+          const stockWarn = stock <= 15 && stock > 5;
+          const priceLabel = p.type === "weight" ? `Ugx${salePrice?.toLocaleString()}/kg` :
+                             p.type === "piece" ? `Ugx${salePrice?.toLocaleString()}/pc` :
+                             `Ugx${salePrice?.toLocaleString()}`;
+          const unitLabel = p.type === "weight" ? `${stock} kg` : p.type === "piece" ? `${stock} pcs` : `${stock} ${p.unit || "pc"}`;
+
           return (
-            <div key={p.id} className="bg-zinc-800/40 rounded-xl border border-zinc-700/30 p-3 flex items-center gap-3">
-              <span className="text-2xl w-9 text-center">{p.image}</span>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
-                  <p className="text-sm text-zinc-200 font-medium truncate">{p.name}</p>
-                  <span className={`px-1.5 py-0.5 rounded text-xs font-semibold border ${typeInfo.color}`} style={{ fontSize: "9px" }}>{typeInfo.icon} {typeInfo.label}</span>
-                </div>
-                <p className="text-xs text-zinc-500 mt-0.5">
-                  {p.type === "variant" ? p.variants.map(v => v.label + ": " + v.stock).join(" · ") :
-                   p.type === "weight" ? formatUGX(p.pricePerKg) + "/kg · " + p.category :
-                   p.type === "piece" ? formatUGX(p.pricePerPiece) + "/pc · " + p.category :
-                   formatUGX(p.price) + " · " + p.category}
-                </p>
+            <div key={p.id} className="bg-white/5 border border-zinc-700/40 rounded-2xl p-3 flex items-start gap-3">
+              {/* Image box */}
+              <div className="w-16 h-16 flex-shrink-0 bg-zinc-700/50 rounded-xl border border-zinc-600/30 flex items-center justify-center">
+                <span className="text-3xl">{p.image || "📦"}</span>
               </div>
-              {isEditing ? (
-                <div className="flex items-center gap-1">
-                  <input type="number" value={editValue} onChange={e => setEditValue(e.target.value)} onKeyDown={e => { if(e.key==="Enter") handleStockSave(p.id); }} autoFocus className="w-16 bg-zinc-700 border border-amber-500/50 rounded-lg px-2 py-1 text-sm text-center text-zinc-100 focus:outline-none" />
-                  <button onClick={() => handleStockSave(p.id)} className="w-7 h-7 rounded-lg bg-amber-500/20 text-amber-400 flex items-center justify-center text-sm font-bold">✓</button>
-                  <button onClick={() => {setEditingId(null);setEditValue("");}} className="w-7 h-7 rounded-lg bg-zinc-700 text-zinc-400 flex items-center justify-center text-sm">✕</button>
-                </div>
-              ) : (
-                <div className="flex items-center gap-1.5">
-                  <button onClick={() => {setEditingId(p.id);setEditValue(String(stock));}}
-                    className={`px-2.5 py-1.5 rounded-lg font-bold text-sm border ${stock <= 5 ? "bg-red-500/10 border-red-500/30 text-red-400" : stock <= 15 ? "bg-yellow-500/10 border-yellow-500/30 text-yellow-400" : "bg-zinc-700/50 border-zinc-600/30 text-zinc-300"}`}>
-                    {stock} {p.unit}
-                  </button>
-                  <button onClick={() => setEditProduct({...p})}
-                    className="w-7 h-7 rounded-lg bg-blue-500/15 text-blue-400 flex items-center justify-center text-xs border border-blue-500/20" title="Edit product">✏️</button>
-                  <button onClick={() => setDeleteConfirm(p.id)}
-                    className="w-7 h-7 rounded-lg bg-red-500/10 text-red-400 flex items-center justify-center text-xs border border-red-500/20" title="Delete product">🗑</button>
-                </div>
-              )}
+
+              {/* Details */}
+              <div className="flex-1 min-w-0 py-0.5">
+                <p className="text-sm font-bold text-zinc-100 leading-snug">
+                  {p.name}
+                  {p.barcode ? <span className="font-normal text-zinc-400">  ({p.barcode})</span> : ""}
+                </p>
+                {p.brand && (
+                  <p className="text-xs text-zinc-500 mt-1">Brand: <span className="text-zinc-300">{p.brand}</span></p>
+                )}
+                <p className="text-xs text-zinc-500 mt-0.5">Category: <span className="text-zinc-300">{p.category || "General"}</span></p>
+                <p className="text-xs mt-0.5">
+                  <span className="text-zinc-500">In Stock: </span>
+                  <span className={`font-medium ${stockLow ? "text-red-400" : stockWarn ? "text-amber-400" : "text-zinc-300"}`}>
+                    {stock} {p.unitDesc || (p.type === "weight" ? "kg" : p.type === "piece" ? "pcs" : p.unit || "pc")}
+                    {stockLow ? " ⚠" : ""}
+                  </span>
+                </p>
+                <p className="text-xs text-zinc-500 mt-0.5">Sale Price: <span className="text-amber-400 font-medium">{priceLabel}</span></p>
+                {p.cost > 0 && (
+                  <p className="text-xs text-zinc-500 mt-0.5">Purchase Price: <span className="text-zinc-300">Ugx{p.cost.toLocaleString()}</span></p>
+                )}
+                {p.lastPurchaseDate && (
+                  <p className="text-xs text-zinc-500 mt-0.5">Last Purchase Date: <span className="text-zinc-300">{new Date(p.lastPurchaseDate).toLocaleDateString("en-UG", {day:"2-digit", month:"short", year:"numeric"})}</span></p>
+                )}
+              </div>
+
+              {/* Edit button only */}
+              <div className="flex-shrink-0 pt-0.5">
+                <button onClick={() => setEditingProduct(p)}
+                  className="w-9 h-9 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 flex items-center justify-center active:scale-90 transition-all">
+                  <svg width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                </button>
+              </div>
             </div>
           );
         })}
       </div>
 
-      {/* Delete confirmation */}
-      {deleteConfirm && (
-        <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-6">
-          <div className="bg-zinc-900 rounded-2xl border border-zinc-700 p-6 w-full max-w-xs space-y-4">
-            <div className="text-center">
-              <span className="text-4xl">🗑️</span>
-              <h3 className="text-base font-bold text-zinc-200 mt-2">Delete Product?</h3>
-              <p className="text-sm text-zinc-500 mt-1">This will remove it from your inventory permanently.</p>
-            </div>
-            <div className="flex gap-3">
-              <button onClick={() => setDeleteConfirm(null)} className="flex-1 py-3 rounded-xl bg-zinc-800 text-zinc-300 font-semibold text-sm">Cancel</button>
-              <button onClick={() => handleDeleteProduct(deleteConfirm)} className="flex-1 py-3 rounded-xl bg-red-500/20 text-red-400 font-bold text-sm border border-red-500/30">Delete</button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* Add product modal */}
+      {showAddForm && <ProductFormModal title="Add New Product" onSave={handleAdd} onClose={() => setShowAddForm(false)} />}
 
       {/* Edit product modal */}
-      {editProduct && (
-        <div className="fixed inset-0 z-50 bg-black/70 flex flex-col justify-end">
-          <div className="bg-zinc-900 rounded-t-2xl max-h-[90vh] flex flex-col">
-            <div className="flex items-center justify-between px-4 pt-4 pb-3 border-b border-zinc-800 flex-shrink-0">
-              <h3 className="text-base font-bold text-zinc-200">Edit Product</h3>
-              <button onClick={() => setEditProduct(null)} className="text-zinc-500 text-lg">✕</button>
-            </div>
-            <div className="overflow-y-auto flex-1 px-4 py-3 space-y-3">
-              <div className="grid grid-cols-2 gap-2">
-                <input type="text" value={editProduct.name} onChange={e => setEditProduct({...editProduct, name: e.target.value})} placeholder="Product name" className="col-span-2 bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2.5 text-sm text-zinc-200 focus:outline-none focus:border-amber-500" />
-                <input type="text" value={editProduct.category} onChange={e => setEditProduct({...editProduct, category: e.target.value})} placeholder="Category" className="bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2.5 text-sm text-zinc-200 focus:outline-none" />
-                <input type="text" value={editProduct.image} onChange={e => setEditProduct({...editProduct, image: e.target.value})} placeholder="Emoji icon" className="bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2.5 text-sm text-zinc-200 text-center focus:outline-none" />
-                {editProduct.type === "barcode" && <input type="number" value={editProduct.price||""} onChange={e => setEditProduct({...editProduct, price: Number(e.target.value)})} placeholder="Sell Price (UGX)" className="bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2.5 text-sm text-zinc-200 focus:outline-none" />}
-                {editProduct.type === "weight" && <input type="number" value={editProduct.pricePerKg||""} onChange={e => setEditProduct({...editProduct, pricePerKg: Number(e.target.value)})} placeholder="Price/Kg (UGX)" className="bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2.5 text-sm text-zinc-200 focus:outline-none" />}
-                {editProduct.type === "piece" && <input type="number" value={editProduct.pricePerPiece||""} onChange={e => setEditProduct({...editProduct, pricePerPiece: Number(e.target.value)})} placeholder="Price/Piece (UGX)" className="bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2.5 text-sm text-zinc-200 focus:outline-none" />}
-                <input type="number" value={editProduct.cost||""} onChange={e => setEditProduct({...editProduct, cost: Number(e.target.value)})} placeholder="Cost Price" className="bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2.5 text-sm text-zinc-200 focus:outline-none" />
-                <input type="text" value={editProduct.barcode||""} onChange={e => setEditProduct({...editProduct, barcode: e.target.value})} placeholder="Barcode" className="col-span-2 bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2.5 text-sm text-zinc-200 focus:outline-none" />
-              </div>
-              <div>
-                <p className="text-xs text-zinc-500 mb-1.5">Unit of measurement</p>
-                <div className="flex flex-wrap gap-1.5">
-                  {["pc","pcs","kg","g","dozen","carton","bag","bottle","pack","tin","box","tray","litre","bundle","roll","pair","sack"].map(u => (
-                    <button key={u} type="button" onClick={() => setEditProduct({...editProduct, unit: u})}
-                      className={`px-2.5 py-1 rounded-lg text-xs font-semibold border transition-all ${editProduct.unit === u ? "bg-amber-500/25 border-amber-500/60 text-amber-400" : "bg-zinc-800 border-zinc-700 text-zinc-500 hover:text-zinc-300"}`}>
-                      {u}
-                    </button>
-                  ))}
-                  <input type="text" value={!["pc","pcs","kg","g","dozen","carton","bag","bottle","pack","tin","box","tray","litre","bundle","roll","pair","sack"].includes(editProduct.unit) ? editProduct.unit : ""}
-                    onChange={e => setEditProduct({...editProduct, unit: e.target.value})}
-                    placeholder="other..."
-                    className="w-16 bg-zinc-800 border border-zinc-700 rounded-lg px-2 py-1 text-xs text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-amber-500" />
-                </div>
-              </div>
-              <div className="flex gap-1 flex-wrap">{["📦","🥤","🍞","🧴","🧼","🪥","🍪","🍺","🥛","🍚","🌾","🥔","🫘","🌽","🥜","🧅","🍅","🥚","🌯","🍩","🫓","🍌","🧈","🫗","🧂","🧹"].map(em => (
-                <button key={em} onClick={() => setEditProduct({...editProduct, image: em})} className={`w-8 h-8 rounded-lg text-lg flex items-center justify-center ${editProduct.image === em ? "bg-amber-500/30 border border-amber-500" : "bg-zinc-800 hover:bg-zinc-700"}`}>{em}</button>
-              ))}</div>
-            </div>
-            <div className="flex gap-3 px-4 py-4 border-t border-zinc-800 flex-shrink-0">
-              <button onClick={() => setEditProduct(null)} className="flex-1 py-3.5 rounded-xl bg-zinc-700 text-zinc-300 font-semibold text-sm">Cancel</button>
-              <button onClick={handleEditSave} className="flex-1 py-3.5 rounded-xl bg-amber-500 text-zinc-900 font-bold text-sm">Save Changes</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ✅ Proper barcode scanner modal — same component as POS, works on all phones */}
-      {showInvScanner && (
-        <BarcodeScannerModal
-          onScan={function(code) {
-            setShowInvScanner(false);
-            playBeep("success");
-            setNp(function(prev) { return Object.assign({}, prev, { barcode: code }); });
-          }}
-          onClose={function() { setShowInvScanner(false); }}
-        />
-      )}
-
-      {/* ✅ AI Snap modal — identifies new product and fills the form */}
-      {showAISnap && (
-        <AISnapModal
-          productType={np.type}
-          onFill={function(aiResult) {
-            setShowAISnap(false);
-            playBeep("success");
-            // Build a human-readable estimate note to show in the form
-            let estimateNote = "";
-            if (aiResult.estimated_weight_kg) estimateNote = `AI estimated ~${aiResult.estimated_weight_kg} kg — update Stock Qty`;
-            else if (aiResult.estimated_pieces) estimateNote = `AI estimated ~${aiResult.estimated_pieces} pieces — update Stock Qty`;
-
-            setNp(function(prev) {
-              const updated = {
-                ...prev,
-                name: aiResult.name || prev.name,
-                category: aiResult.category || prev.category,
-                image: aiResult.emoji || prev.image,
-                aiEstimate: estimateNote,
-              };
-              // Auto-switch type if AI suggests a different one and user hasn't typed prices yet
-              if (aiResult.suggested_type && !prev.price && !prev.pricePerKg && !prev.pricePerPiece) {
-                updated.type = aiResult.suggested_type;
-              }
-              // Pre-fill stock with AI estimate
-              if (aiResult.estimated_weight_kg && updated.type === "weight") {
-                updated.stock = String(aiResult.estimated_weight_kg);
-              } else if (aiResult.estimated_pieces && updated.type === "piece") {
-                updated.stock = String(aiResult.estimated_pieces);
-              }
-              return updated;
-            });
-          }}
-          onClose={function() { setShowAISnap(false); }}
-        />
-      )}
+      {editingProduct && <ProductFormModal title="Edit Product" initial={editingProduct} onSave={handleEdit} onDelete={(id) => { handleDelete(id); setEditingProduct(null); }} onClose={() => setEditingProduct(null)} />}
     </div>
   );
 }
 
-function HistoryScreen({ sales: todaySales }) {
-  const [viewDate, setViewDate] = useState(new Date().toISOString().split("T")[0]);
-  const [filterMethod, setFilterMethod] = useState("all");
-  const [historySales, setHistorySales] = useState([]);
-  const [loadingHistory, setLoadingHistory] = useState(false);
-
-  const isToday = viewDate === new Date().toISOString().split("T")[0];
-  const displaySales = isToday ? todaySales : historySales;
-
-  useEffect(() => {
-    if (isToday) return;
-    setLoadingHistory(true);
-    api.get("getSales", { date: viewDate, limit: 200 })
-      .then(res => {
-        if (res && res.success) {
-          const mapped = (res.sales || []).map(s => ({
-            ...s,
-            method: s.method || "cash",
-            time: s.dateTime ? new Date(s.dateTime).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : ""
-          }));
-          setHistorySales(mapped);
-        }
-      })
-      .finally(() => setLoadingHistory(false));
-  }, [viewDate]);
-
-  const filtered = displaySales.filter(s => filterMethod === "all" || s.method === filterMethod);
-  const total = filtered.reduce((s, sale) => s + sale.total, 0);
-  const profit = filtered.reduce((s, sale) => s + (sale.items || []).reduce((p, i) => p + ((i.unitPrice - (i.cost || 0)) * i.qty), 0), 0);
+function HistoryScreen({ sales }) {
+  const todayTotal = sales.reduce((s, sale) => s + sale.total, 0);
+  const todayProfit = sales.reduce((s, sale) => s + sale.items.reduce((p, i) => p + ((i.unitPrice - (i.cost || 0)) * i.qty), 0), 0);
 
   return (
     <div className="flex flex-col h-full">
-      {/* Date picker + filter */}
-      <div className="px-4 pt-4 pb-2 space-y-2">
-        <div className="flex gap-2">
-          <input type="date" value={viewDate} onChange={e => setViewDate(e.target.value)} max={new Date().toISOString().split("T")[0]}
-            className="flex-1 bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-2.5 text-sm text-zinc-200 focus:outline-none focus:border-amber-500" />
-          <button onClick={() => setViewDate(new Date().toISOString().split("T")[0])}
-            className={`px-3 py-2.5 rounded-xl text-xs font-bold border transition-all ${isToday ? "bg-amber-500/20 border-amber-500/40 text-amber-400" : "bg-zinc-800 border-zinc-700 text-zinc-400"}`}>Today</button>
-        </div>
-        <div className="flex gap-2">
-          {[["all","All"],["cash","💵 Cash"],["momo","📱 MoMo"],["credit","📝 Credit"]].map(([id, label]) => (
-            <button key={id} onClick={() => setFilterMethod(id)}
-              className={`flex-1 py-1.5 rounded-lg text-xs font-medium border transition-all ${filterMethod === id ? "bg-amber-500/20 border-amber-500/40 text-amber-400" : "bg-zinc-800/60 border-zinc-700/30 text-zinc-500"}`}>{label}</button>
-          ))}
-        </div>
-      </div>
-
-      {/* Summary card */}
-      <div className="px-4 pb-2">
-        <div className="bg-gradient-to-br from-amber-500/10 to-orange-500/10 rounded-2xl border border-amber-500/20 p-4">
-          <p className="text-xs text-amber-400/70 uppercase tracking-wider mb-1">{isToday ? "Today" : viewDate}</p>
-          <p className="text-3xl font-bold text-amber-400">{formatUGX(total)}</p>
-          <div className="flex gap-4 mt-2">
-            <div><p className="text-xs text-zinc-500">Transactions</p><p className="text-lg font-bold text-zinc-200">{filtered.length}</p></div>
-            <div><p className="text-xs text-zinc-500">Gross Profit</p><p className="text-lg font-bold text-emerald-400">{formatUGX(profit)}</p></div>
-            <div><p className="text-xs text-zinc-500">Avg. Sale</p><p className="text-lg font-bold text-zinc-200">{filtered.length > 0 ? formatUGX(Math.round(total / filtered.length)) : "-"}</p></div>
+      <div className="p-4">
+        <div className="bg-gradient-to-br from-amber-500/10 to-orange-500/10 rounded-2xl border border-amber-500/20 p-5">
+          <p className="text-xs text-amber-400/70 uppercase tracking-wider mb-1">Today's Sales</p>
+          <p className="text-3xl font-bold text-amber-400" style={{ fontFamily: "'DM Sans', sans-serif" }}>{formatUGX(todayTotal)}</p>
+          <div className="flex gap-4 mt-3">
+            <div><p className="text-xs text-zinc-500">Transactions</p><p className="text-lg font-bold text-zinc-200">{sales.length}</p></div>
+            <div><p className="text-xs text-zinc-500">Gross Profit</p><p className="text-lg font-bold text-emerald-400">{formatUGX(todayProfit)}</p></div>
+            <div><p className="text-xs text-zinc-500">Avg. Sale</p><p className="text-lg font-bold text-zinc-200">{sales.length > 0 ? formatUGX(Math.round(todayTotal / sales.length)) : "—"}</p></div>
           </div>
         </div>
       </div>
-
-      {/* Sales list */}
       <div className="flex-1 overflow-y-auto px-4 pb-4">
-        {loadingHistory ? (
-          <div className="text-center py-12"><div className="w-8 h-8 border-2 border-amber-500 border-t-transparent rounded-full animate-spin mx-auto mb-3" /><p className="text-zinc-500 text-sm">Loading sales...</p></div>
-        ) : filtered.length === 0 ? (
-          <div className="text-center py-16"><span className="text-5xl mb-4 block">🧾</span><p className="text-zinc-500">No sales for this day</p><p className="text-zinc-600 text-sm mt-1">Try a different date or payment filter</p></div>
+        {sales.length === 0 ? (
+          <div className="text-center py-16"><span className="text-5xl mb-4 block">🧾</span><p className="text-zinc-500">No sales yet today</p><p className="text-zinc-600 text-sm mt-1">Complete a sale to see it here</p></div>
         ) : (
           <div className="space-y-2">
-            {[...filtered].reverse().map((sale) => (
-              <div key={sale.id || sale.offlineId} className="bg-zinc-800/40 rounded-xl border border-zinc-700/30 p-4">
+            {[...sales].reverse().map((sale) => (
+              <div key={sale.id} className="bg-zinc-800/40 rounded-xl border border-zinc-700/30 p-4">
                 <div className="flex items-center justify-between mb-2">
                   <div className="flex items-center gap-2">
                     <span className={`px-2 py-0.5 rounded-md text-xs font-medium ${sale.method === "cash" ? "bg-emerald-500/15 text-emerald-400" : sale.method === "momo" ? "bg-blue-500/15 text-blue-400" : "bg-orange-500/15 text-orange-400"}`}>
                       {sale.method === "cash" ? "💵 Cash" : sale.method === "momo" ? "📱 MoMo" : "📝 Credit"}
                     </span>
-                    <span className="text-xs text-zinc-600">#{sale.id || "local"}</span>
+                    <span className="text-xs text-zinc-600">#{sale.id}</span>
                   </div>
                   <span className="text-xs text-zinc-500">{sale.time}</span>
                 </div>
                 <div className="space-y-1">
-                  {(sale.items || []).map((item, j) => (
+                  {sale.items.map((item, j) => (
                     <div key={j} className="flex justify-between text-sm">
-                      <span className="text-zinc-400">{item.image} {item.name} {item.type !== "weight" ? `x${item.qty}` : ""}</span>
+                      <span className="text-zinc-400">{item.image} {item.name} {item.type !== "weight" ? `× ${item.qty}` : ""}</span>
                       <span className="text-zinc-300 font-medium">{formatUGX(item.lineTotal)}</span>
                     </div>
                   ))}
@@ -2193,114 +1644,365 @@ function LoginScreen({ onLogin }) {
   );
 }
 
-function SettingsPanel({ online, source, pendingCount, onSync, onClose }) {
-  const [apiKey, setApiKey] = React.useState(localStorage.getItem("anthropic_key") || "");
-  const [saved, setSaved] = React.useState(false);
+// ═══════════════════════════════════════════════════════════════
+// Dashboard Screen
+// ═══════════════════════════════════════════════════════════════
+function DashboardScreen({ sales, products, user, onNavigate }) {
+  const today = new Date();
+  const greeting = today.getHours() < 12 ? "Good morning" : today.getHours() < 17 ? "Good afternoon" : "Good evening";
 
-  const handleSaveKey = () => {
-    const trimmed = apiKey.trim();
-    if (trimmed) {
-      localStorage.setItem("anthropic_key", trimmed);
-    } else {
-      localStorage.removeItem("anthropic_key");
-    }
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2000);
-  };
+  // Sales metrics
+  const todayTotal = sales.reduce((s, sale) => s + sale.total, 0);
+  const todayProfit = sales.reduce((s, sale) => s + sale.items.reduce((p, i) => p + ((i.unitPrice - (i.cost || 0)) * i.qty), 0), 0);
+  const todayTxCount = sales.length;
+  const cashSales = sales.filter(s => s.method === "cash").reduce((sum, s) => sum + s.total, 0);
+  const momoSales = sales.filter(s => s.method === "momo").reduce((sum, s) => sum + s.total, 0);
 
-  const handleClearKey = () => {
-    localStorage.removeItem("anthropic_key");
-    setApiKey("");
-    setSaved(false);
-  };
+  // Stock metrics
+  const getStock = (p) => p.type === "variant" ? p.variants.reduce((s, v) => s + v.stock, 0) : (p.stock || 0);
+  const lowStockItems = products.filter(p => getStock(p) <= 10 && getStock(p) > 0);
+  const outOfStockItems = products.filter(p => getStock(p) === 0);
+  const totalProducts = products.length;
 
-  const storedKey = localStorage.getItem("anthropic_key");
+  const tiles = [
+    {
+      id: "new-sale",
+      label: "New Sale",
+      sub: todayTxCount > 0 ? `${todayTxCount} sale${todayTxCount !== 1 ? "s" : ""} today` : "Start selling",
+      icon: (
+        <svg width="28" height="28" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24">
+          <path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/>
+          <path d="M16 10a4 4 0 01-8 0"/>
+        </svg>
+      ),
+      color: "from-amber-500 to-orange-500",
+      shadow: "shadow-amber-500/20",
+      textColor: "text-amber-50",
+      subColor: "text-amber-100/70",
+      full: true,
+      metric: todayTotal > 0 ? formatUGX(todayTotal) : null,
+      metricLabel: todayTotal > 0 ? "Today's Revenue" : null,
+      tab: "pos",
+    },
+    {
+      id: "add-product",
+      label: "Add Product",
+      sub: `${totalProducts} products`,
+      icon: (
+        <svg width="24" height="24" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24">
+          <path d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/>
+          <circle cx="18" cy="18" r="4" fill="currentColor" fillOpacity="0.15"/><line x1="18" y1="16" x2="18" y2="20"/><line x1="16" y1="18" x2="20" y2="18"/>
+        </svg>
+      ),
+      color: "from-blue-600 to-indigo-600",
+      shadow: "shadow-blue-500/20",
+      textColor: "text-blue-50",
+      subColor: "text-blue-100/70",
+      tab: "inventory-add",
+    },
+    {
+      id: "sales-summary",
+      label: "Sales Summary",
+      sub: todayTxCount > 0 ? `Profit: ${formatUGX(todayProfit)}` : "No sales yet",
+      icon: (
+        <svg width="24" height="24" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24">
+          <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
+        </svg>
+      ),
+      color: "from-emerald-600 to-teal-600",
+      shadow: "shadow-emerald-500/20",
+      textColor: "text-emerald-50",
+      subColor: "text-emerald-100/70",
+      tab: "history",
+    },
+    {
+      id: "purchases",
+      label: "Purchases",
+      sub: "Stock purchases log",
+      icon: (
+        <svg width="24" height="24" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24">
+          <path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/>
+          <polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/>
+        </svg>
+      ),
+      color: "from-violet-600 to-purple-600",
+      shadow: "shadow-violet-500/20",
+      textColor: "text-violet-50",
+      subColor: "text-violet-100/70",
+      tab: "purchases",
+    },
+    {
+      id: "stock-overview",
+      label: "Stock Overview",
+      sub: outOfStockItems.length > 0 ? `⚠ ${outOfStockItems.length} out of stock` : lowStockItems.length > 0 ? `${lowStockItems.length} low stock` : "Stock healthy",
+      icon: (
+        <svg width="24" height="24" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24">
+          <rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/>
+          <polyline points="7 10 10 13 13 9 16 11"/>
+        </svg>
+      ),
+      color: "from-cyan-600 to-sky-600",
+      shadow: "shadow-cyan-500/20",
+      textColor: "text-cyan-50",
+      subColor: outOfStockItems.length > 0 ? "text-red-200" : lowStockItems.length > 0 ? "text-amber-200" : "text-cyan-100/70",
+      tab: "inventory",
+    },
+  ];
+
+  const fullTile = tiles.find(t => t.full);
+  const halfTiles = tiles.filter(t => !t.full);
 
   return (
-    <div className="absolute right-4 top-14 z-40 w-80 bg-zinc-900 border border-zinc-700 rounded-2xl shadow-2xl p-4 space-y-4">
-      <div className="flex items-center justify-between">
-        <h3 className="text-sm font-bold text-zinc-200">⚙️ Settings</h3>
-        <button onClick={onClose} className="text-zinc-500 hover:text-zinc-300 text-lg leading-none">✕</button>
+    <div className="flex flex-col h-full overflow-y-auto">
+      {/* Greeting */}
+      <div className="px-4 pt-4 pb-2">
+        <p className="text-xs text-zinc-500">{greeting},</p>
+        <h2 className="text-xl font-bold text-zinc-100" style={{ fontFamily: "'DM Sans', sans-serif" }}>
+          {user && user.name ? user.name : "Welcome"} 👋
+        </h2>
+        <p className="text-xs text-zinc-600 mt-0.5">
+          {today.toLocaleDateString("en-UG", { weekday: "long", day: "numeric", month: "long" })}
+        </p>
       </div>
 
-      {/* AI Snap Key */}
-      <div className="space-y-2">
-        <div className="flex items-center justify-between">
-          <label className="text-xs font-semibold text-zinc-300">🤖 AI Snap API Key</label>
-          {storedKey && <span className="text-xs text-emerald-400 font-medium">✓ Saved</span>}
+      {/* Quick stats strip */}
+      {todayTotal > 0 && (
+        <div className="mx-4 mt-2 mb-1 bg-zinc-800/40 border border-zinc-700/30 rounded-xl px-4 py-3 flex gap-4 overflow-x-auto">
+          <div className="flex-shrink-0">
+            <p className="text-xs text-zinc-500">Revenue</p>
+            <p className="text-sm font-bold text-amber-400">{formatUGX(todayTotal)}</p>
+          </div>
+          <div className="w-px bg-zinc-700/50 flex-shrink-0" />
+          <div className="flex-shrink-0">
+            <p className="text-xs text-zinc-500">Profit</p>
+            <p className="text-sm font-bold text-emerald-400">{formatUGX(todayProfit)}</p>
+          </div>
+          <div className="w-px bg-zinc-700/50 flex-shrink-0" />
+          <div className="flex-shrink-0">
+            <p className="text-xs text-zinc-500">Cash</p>
+            <p className="text-sm font-bold text-zinc-200">{formatUGX(cashSales)}</p>
+          </div>
+          <div className="w-px bg-zinc-700/50 flex-shrink-0" />
+          <div className="flex-shrink-0">
+            <p className="text-xs text-zinc-500">MoMo</p>
+            <p className="text-sm font-bold text-blue-400">{formatUGX(momoSales)}</p>
+          </div>
         </div>
-        <input
-          type="password"
-          value={apiKey}
-          onChange={e => { setApiKey(e.target.value); setSaved(false); }}
-          placeholder="Paste your Anthropic key here (sk-ant-...)"
-          className="w-full bg-zinc-800 border border-zinc-600 rounded-xl px-3 py-2.5 text-xs text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-violet-500/60 focus:ring-1 focus:ring-violet-500/20"
-        />
-        <p className="text-xs text-zinc-600">Get your key at console.anthropic.com → API Keys</p>
-        <div className="flex gap-2">
-          <button onClick={handleSaveKey}
-            className={`flex-1 py-2 rounded-xl text-xs font-semibold transition-all ${saved ? "bg-emerald-500/20 text-emerald-400" : "bg-violet-500/20 text-violet-400 hover:bg-violet-500/30"}`}>
-            {saved ? "✓ Saved!" : "Save Key"}
-          </button>
-          {storedKey && (
-            <button onClick={handleClearKey}
-              className="px-3 py-2 rounded-xl text-xs font-medium bg-zinc-800 text-zinc-500 hover:text-red-400 hover:bg-red-500/10 transition-all">
-              Clear
-            </button>
+      )}
+
+      {/* Tiles */}
+      <div className="px-4 pt-3 pb-6 space-y-3">
+        {/* New Sale — full width */}
+        <button
+          onClick={() => onNavigate(fullTile.tab)}
+          className={`w-full bg-gradient-to-br ${fullTile.color} rounded-2xl p-5 flex items-center justify-between shadow-lg ${fullTile.shadow} active:scale-98 transition-all`}
+        >
+          <div className="flex items-center gap-4">
+            <div className="w-12 h-12 rounded-xl bg-white/15 flex items-center justify-center flex-shrink-0">
+              <span className={fullTile.textColor}>{fullTile.icon}</span>
+            </div>
+            <div className="text-left">
+              <p className={`text-lg font-bold ${fullTile.textColor}`} style={{ fontFamily: "'DM Sans', sans-serif" }}>{fullTile.label}</p>
+              <p className={`text-sm ${fullTile.subColor}`}>{fullTile.sub}</p>
+            </div>
+          </div>
+          {fullTile.metric && (
+            <div className="text-right flex-shrink-0">
+              <p className={`text-xl font-bold ${fullTile.textColor}`}>{fullTile.metric}</p>
+              <p className={`text-xs ${fullTile.subColor}`}>{fullTile.metricLabel}</p>
+            </div>
           )}
+        </button>
+
+        {/* 2×2 grid */}
+        <div className="grid grid-cols-2 gap-3">
+          {halfTiles.map(tile => (
+            <button
+              key={tile.id}
+              onClick={() => onNavigate(tile.tab)}
+              className={`bg-gradient-to-br ${tile.color} rounded-2xl p-4 flex flex-col gap-3 shadow-lg ${tile.shadow} active:scale-95 transition-all text-left`}
+            >
+              <div className="w-10 h-10 rounded-xl bg-white/15 flex items-center justify-center">
+                <span className={tile.textColor}>{tile.icon}</span>
+              </div>
+              <div>
+                <p className={`text-sm font-bold ${tile.textColor}`} style={{ fontFamily: "'DM Sans', sans-serif" }}>{tile.label}</p>
+                <p className={`text-xs mt-0.5 ${tile.subColor}`}>{tile.sub}</p>
+              </div>
+            </button>
+          ))}
         </div>
       </div>
-
-      {/* Divider */}
-      <div className="border-t border-zinc-800" />
-
-      {/* Connection info */}
-      <div className="space-y-2">
-        <p className="text-xs font-semibold text-zinc-400">Connection</p>
-        <div className="flex items-center justify-between">
-          <span className="text-xs text-zinc-500">Status</span>
-          <span className={`text-xs font-medium ${online ? "text-emerald-400" : "text-red-400"}`}>{online ? "Online" : "Offline"}</span>
-        </div>
-        <div className="flex items-center justify-between">
-          <span className="text-xs text-zinc-500">Data</span>
-          <span className="text-xs font-medium text-zinc-300">{source === "api" ? "Live (Google Sheets)" : source === "cache" ? "Cached" : "Local only"}</span>
-        </div>
-        <div className="flex items-center justify-between">
-          <span className="text-xs text-zinc-500">Pending Sales</span>
-          <span className={`text-xs font-medium ${pendingCount > 0 ? "text-amber-400" : "text-emerald-400"}`}>{pendingCount > 0 ? `${pendingCount} awaiting sync` : "All synced ✓"}</span>
-        </div>
-      </div>
-
-      <button onClick={onSync}
-        className="w-full py-2.5 rounded-xl bg-amber-500/20 text-amber-400 text-xs font-semibold hover:bg-amber-500/30 transition-all">
-        ↻ Sync Now
-      </button>
     </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Side Drawer Navigation
+// ═══════════════════════════════════════════════════════════════
+function SideDrawer({ open, onClose, user, activeTab, onNavigate, onLogout, online, pendingCount, syncing, source, onSync }) {
+  const menuItems = [
+    {
+      id: "dashboard", label: "Dashboard",
+      icon: <svg width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+    },
+    {
+      id: "pos", label: "New Sale",
+      icon: <svg width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24"><path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 01-8 0"/></svg>
+    },
+    {
+      id: "inventory", label: "Inventory",
+      icon: <svg width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24"><path d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/></svg>
+    },
+    {
+      id: "history", label: "Sales & Bills",
+      icon: <svg width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+    },
+    {
+      id: "customers", label: "Customers",
+      icon: <svg width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/></svg>,
+      badge: "Soon",
+    },
+    {
+      id: "reports", label: "Reports",
+      icon: <svg width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>,
+      badge: "Soon",
+    },
+    {
+      id: "settings-drawer", label: "Settings",
+      icon: <svg width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24"><path d="M12 15a3 3 0 100-6 3 3 0 000 6z"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
+    },
+  ];
+
+  const roleColor = user && user.role === "Admin" ? "from-amber-500 to-orange-500" :
+                    user && user.role === "Manager" ? "from-blue-500 to-indigo-500" :
+                    "from-emerald-500 to-teal-500";
+
+  const handleNav = (id) => {
+    if (id === "settings-drawer") {
+      onNavigate("settings");
+    } else if (id === "customers" || id === "reports") {
+      // coming soon - do nothing
+    } else {
+      onNavigate(id);
+    }
+    onClose();
+  };
+
+  return (
+    <>
+      {/* Backdrop */}
+      <div
+        onClick={onClose}
+        className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm transition-opacity duration-300"
+        style={{ opacity: open ? 1 : 0, pointerEvents: open ? "auto" : "none" }}
+      />
+
+      {/* Drawer panel */}
+      <div
+        className="fixed top-0 left-0 h-full z-50 w-72 bg-zinc-900 flex flex-col shadow-2xl"
+        style={{
+          transform: open ? "translateX(0)" : "translateX(-100%)",
+          transition: "transform 0.28s cubic-bezier(0.4,0,0.2,1)",
+          borderRight: "1px solid rgba(63,63,70,0.5)"
+        }}
+      >
+        {/* User profile area */}
+        <div className="px-5 pt-12 pb-5 border-b border-zinc-800">
+          <div className="flex items-center gap-3">
+            <div className={`w-12 h-12 rounded-full bg-gradient-to-br ${roleColor} flex items-center justify-center shadow-lg flex-shrink-0`}>
+              <svg width="22" height="22" fill="white" viewBox="0 0 24 24"><path d="M12 12c2.7 0 4.8-2.1 4.8-4.8S14.7 2.4 12 2.4 7.2 4.5 7.2 7.2 9.3 12 12 12zm0 2.4c-3.2 0-9.6 1.6-9.6 4.8v2.4h19.2v-2.4c0-3.2-6.4-4.8-9.6-4.8z"/></svg>
+            </div>
+            <div className="min-w-0">
+              <p className="text-base font-bold text-zinc-100 truncate" style={{fontFamily:"'DM Sans',sans-serif"}}>{user && user.name ? user.name : "User"}</p>
+              <p className="text-xs text-zinc-400">{user && user.role ? user.role : "Cashier"}</p>
+            </div>
+          </div>
+
+          {/* Sync status mini strip */}
+          <div className="mt-3 flex items-center gap-2 px-3 py-2 bg-zinc-800/60 rounded-xl">
+            <span className={`w-2 h-2 rounded-full flex-shrink-0 ${online ? "bg-emerald-400" : "bg-red-400"} ${syncing ? "animate-pulse" : ""}`} />
+            <span className="text-xs text-zinc-400 flex-1">{online ? "Online" : "Offline"}</span>
+            <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${source === "api" ? "bg-emerald-500/15 text-emerald-400" : source === "cache" ? "bg-blue-500/15 text-blue-400" : "bg-zinc-700 text-zinc-400"}`}>
+              {source === "api" ? "Live" : source === "cache" ? "Cached" : "Demo"}
+            </span>
+            {pendingCount > 0 && (
+              <button onClick={() => { onSync(); onClose(); }} className="text-xs text-amber-400 font-bold">
+                {pendingCount}↑
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Menu items */}
+        <div className="flex-1 overflow-y-auto py-3 px-3 space-y-0.5">
+          {menuItems.map(item => {
+            const isActive = activeTab === item.id || (item.id === "settings-drawer" && activeTab === "settings");
+            return (
+              <button
+                key={item.id}
+                onClick={() => handleNav(item.id)}
+                className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-left transition-all active:scale-98 ${
+                  isActive
+                    ? "bg-amber-500/15 text-amber-400 border border-amber-500/25"
+                    : item.badge
+                    ? "text-zinc-600 cursor-default"
+                    : "text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100"
+                }`}
+              >
+                <span className={isActive ? "text-amber-400" : item.badge ? "text-zinc-700" : "text-zinc-400"}>
+                  {item.icon}
+                </span>
+                <span className="flex-1 text-sm font-medium">{item.label}</span>
+                {item.badge && (
+                  <span className="text-xs px-2 py-0.5 rounded-full bg-zinc-800 text-zinc-600 font-medium">{item.badge}</span>
+                )}
+              </button>
+            );
+          })}
+
+          {/* Divider */}
+          <div className="my-3 border-t border-zinc-800" />
+
+          {/* Sync button */}
+          <button
+            onClick={() => { onSync(); onClose(); }}
+            disabled={!online}
+            className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 transition-all disabled:opacity-40 text-sm font-medium"
+          >
+            <svg width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24" className={syncing ? "animate-spin" : ""}><path d="M21 12a9 9 0 11-6.219-8.56"/></svg>
+            Sync Data
+            {pendingCount > 0 && <span className="ml-auto bg-amber-500/20 text-amber-400 text-xs font-bold px-2 py-0.5 rounded-full">{pendingCount}</span>}
+          </button>
+        </div>
+
+        {/* Logout button */}
+        <div className="p-4 border-t border-zinc-800">
+          <button
+            onClick={() => { onLogout(); onClose(); }}
+            className="w-full py-3.5 rounded-xl bg-red-600 hover:bg-red-500 text-white font-bold text-sm flex items-center justify-center gap-2 active:scale-95 transition-all shadow-lg shadow-red-600/20"
+          >
+            <svg width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+            Logout
+          </button>
+        </div>
+      </div>
+    </>
   );
 }
 
 function RetailFlowPOS() {
   const [loggedIn, setLoggedIn] = useState(false);
   const [user, setUser] = useState(null);
-  const [activeTab, setActiveTab] = useState("pos");
+  const [activeTab, setActiveTab] = useState("dashboard");
+  const [autoOpenAdd, setAutoOpenAdd] = useState(false);
   const { products, setProducts, loading, source, refreshProducts } = useProducts();
   const [cart, setCart] = useState([]);
   const [sales, setSales] = useState([]);
   const [showPayment, setShowPayment] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [showDrawer, setShowDrawer] = useState(false);
   const { online, pendingCount, lastSync, syncing, setPendingCount } = useOnlineStatus();
-
-  // FIX: inject Google Font into <head> properly instead of rendering a <link> inside JSX body
-  useEffect(() => {
-    const id = "dm-sans-font";
-    if (!document.getElementById(id)) {
-      const link = document.createElement("link");
-      link.id = id;
-      link.rel = "stylesheet";
-      link.href = "https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&display=swap";
-      document.head.appendChild(link);
-    }
-  }, []);
 
   const cartTotal = cart.reduce((sum, c) => sum + c.lineTotal, 0);
   const cartCount = cart.reduce((sum, c) => sum + c.qty, 0);
@@ -2387,9 +2089,24 @@ function RetailFlowPOS() {
     await refreshProducts();
   };
 
+  // Dashboard navigation handler
+  const handleNavigate = (tab) => {
+    if (tab === "inventory-add") {
+      setActiveTab("inventory");
+      setAutoOpenAdd(true);
+    } else if (tab === "purchases") {
+      setActiveTab("inventory");
+    } else if (tab === "settings") {
+      setShowSettings(true);
+    } else {
+      setActiveTab(tab);
+    }
+  };
+
   if (!loggedIn) return <LoginScreen onLogin={(u) => { setUser(u); setLoggedIn(true); }} />;
 
   const tabs = [
+    { id: "dashboard", label: "Home", icon: <svg width="22" height="22" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg> },
     { id: "pos", label: "Sell", icon: <svg width="22" height="22" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24"><path d="M3 7V5a2 2 0 012-2h2M17 3h2a2 2 0 012 2v2M21 17v2a2 2 0 01-2 2h-2M7 21H5a2 2 0 01-2-2v-2"/><line x1="7" y1="12" x2="17" y2="12"/><line x1="12" y1="7" x2="12" y2="17"/></svg> },
     { id: "inventory", label: "Stock", icon: <svg width="22" height="22" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24"><path d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/></svg> },
     { id: "history", label: "Sales", icon: <svg width="22" height="22" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24"><path d="M12 8v4l3 3"/><circle cx="12" cy="12" r="9"/></svg> },
@@ -2397,11 +2114,32 @@ function RetailFlowPOS() {
 
   return (
     <div className="h-screen flex flex-col bg-zinc-950 text-zinc-100 overflow-hidden" style={{ background: "linear-gradient(180deg, rgba(24,24,27,1) 0%, rgba(9,9,11,1) 100%)" }}>
+      <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&display=swap" rel="stylesheet" />
 
-      {/* Header with Sync Status */}
+      {/* Side Drawer */}
+      <SideDrawer
+        open={showDrawer}
+        onClose={() => setShowDrawer(false)}
+        user={user}
+        activeTab={activeTab}
+        onNavigate={handleNavigate}
+        onLogout={() => { setLoggedIn(false); setUser(null); setCart([]); }}
+        online={online}
+        pendingCount={pendingCount}
+        syncing={syncing}
+        source={source}
+        onSync={handleManualSync}
+      />
+
+      {/* Header */}
       <header className="flex items-center justify-between px-4 py-3 border-b border-zinc-800/50 bg-zinc-950/80 backdrop-blur-sm">
         <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-amber-500 to-orange-600 flex items-center justify-center shadow-lg shadow-amber-500/10"><span className="text-lg">🏪</span></div>
+          {/* Hamburger */}
+          <button onClick={() => setShowDrawer(true)} className="w-9 h-9 rounded-xl bg-zinc-800/80 border border-zinc-700/40 flex flex-col items-center justify-center gap-1.5 active:scale-90 transition-all">
+            <span className="w-4 h-0.5 bg-zinc-300 rounded-full" />
+            <span className="w-4 h-0.5 bg-zinc-300 rounded-full" />
+            <span className="w-3 h-0.5 bg-zinc-300 rounded-full self-start ml-2.5" />
+          </button>
           <div>
             <h1 className="text-sm font-bold text-zinc-100 leading-none" style={{ fontFamily: "'DM Sans', sans-serif" }}>Oola RetailFlow</h1>
             <p className="text-xs text-zinc-500 leading-none mt-0.5">{(user && user.name ? user.name : "User")} • {new Date().toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })}</p>
@@ -2411,23 +2149,14 @@ function RetailFlowPOS() {
         <div className="flex items-center gap-2">
           {/* Connection & Sync Status */}
           <button onClick={handleManualSync} className="flex items-center gap-1.5 px-2 py-1 rounded-lg hover:bg-zinc-800 transition-all" title={online ? "Online" : "Offline"}>
-            {/* Online/Offline dot */}
             <span className={`w-2 h-2 rounded-full ${online ? "bg-emerald-400 shadow shadow-emerald-400/50" : "bg-red-400 shadow shadow-red-400/50"} ${syncing ? "animate-pulse" : ""}`} />
-
-            {/* Pending sync count */}
             {pendingCount > 0 && (
               <span className="flex items-center gap-0.5 text-xs text-amber-400 font-medium">
                 <svg width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" className={syncing ? "animate-spin" : ""}><path d="M21 12a9 9 0 11-6.219-8.56"/></svg>
                 {pendingCount}
               </span>
             )}
-
-            {/* Data source badge */}
-            <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${
-              source === "api" ? "bg-emerald-500/15 text-emerald-400" :
-              source === "cache" ? "bg-blue-500/15 text-blue-400" :
-              "bg-zinc-700 text-zinc-400"
-            }`}>
+            <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${source === "api" ? "bg-emerald-500/15 text-emerald-400" : source === "cache" ? "bg-blue-500/15 text-blue-400" : "bg-zinc-700 text-zinc-400"}`}>
               {source === "api" ? "Live" : source === "cache" ? "Cached" : "Demo"}
             </span>
           </button>
@@ -2436,8 +2165,6 @@ function RetailFlowPOS() {
           <button onClick={() => setShowSettings(!showSettings)} className="text-zinc-500 hover:text-zinc-300 p-1 rounded-lg hover:bg-zinc-800 transition-all">
             <svg width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24"><path d="M12 15a3 3 0 100-6 3 3 0 000 6z"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
           </button>
-
-          <button onClick={() => { setLoggedIn(false); setUser(null); setCart([]); }} className="text-xs text-zinc-500 hover:text-red-400 transition-colors px-2 py-1.5 rounded-lg hover:bg-red-500/10">Out</button>
         </div>
       </header>
 
@@ -2452,16 +2179,49 @@ function RetailFlowPOS() {
 
       {/* Settings Dropdown */}
       {showSettings && (
-        <SettingsPanel
-          online={online}
-          source={source}
-          pendingCount={pendingCount}
-          onSync={() => { handleManualSync(); setShowSettings(false); }}
-          onClose={() => setShowSettings(false)}
-        />
+        <div className="absolute right-4 top-14 z-40 w-72 bg-zinc-900 border border-zinc-700 rounded-2xl shadow-2xl p-4 space-y-3">
+          <h3 className="text-sm font-bold text-zinc-200">Settings</h3>
+
+          <div>
+            <label className="text-xs text-zinc-500 block mb-1">API URL (Apps Script Web App)</label>
+            <div className="bg-zinc-800 rounded-lg p-2 text-xs text-zinc-400 font-mono break-all">
+              {API_URL || "Not configured — using demo mode"}
+            </div>
+            <p className="text-xs text-zinc-600 mt-1">Set API_URL in the code to connect to your Google Sheet</p>
+          </div>
+
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-zinc-400">Connection</span>
+            <span className={`text-xs font-medium ${online ? "text-emerald-400" : "text-red-400"}`}>{online ? "Online" : "Offline"}</span>
+          </div>
+
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-zinc-400">Data Source</span>
+            <span className="text-xs font-medium text-zinc-300">{source === "api" ? "Live (Google Sheets)" : source === "cache" ? "Cached (IndexedDB)" : "Demo Data"}</span>
+          </div>
+
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-zinc-400">Pending Sales</span>
+            <span className={`text-xs font-medium ${pendingCount > 0 ? "text-amber-400" : "text-emerald-400"}`}>{pendingCount > 0 ? `${pendingCount} awaiting sync` : "All synced ✓"}</span>
+          </div>
+
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-zinc-400">Device ID</span>
+            <span className="text-xs text-zinc-500 font-mono">{DEVICE_ID}</span>
+          </div>
+
+          <div className="flex gap-2 pt-2 border-t border-zinc-800">
+            <button onClick={() => { handleManualSync(); setShowSettings(false); }}
+              className="flex-1 py-2 rounded-lg bg-amber-500/20 text-amber-400 text-xs font-medium hover:bg-amber-500/30 transition-all">
+              ↻ Sync Now
+            </button>
+            <button onClick={() => setShowSettings(false)}
+              className="flex-1 py-2 rounded-lg bg-zinc-800 text-zinc-400 text-xs font-medium hover:bg-zinc-700 transition-all">
+              Close
+            </button>
+          </div>
+        </div>
       )}
-
-
 
       {/* Loading indicator */}
       {loading && (
@@ -2472,8 +2232,9 @@ function RetailFlowPOS() {
 
       {/* Content */}
       <main className="flex-1 overflow-hidden">
+        {activeTab === "dashboard" && <DashboardScreen sales={sales} products={products} user={user} onNavigate={handleNavigate} />}
         {activeTab === "pos" && <POSScreen products={products} cart={cart} setCart={setCart} onComplete={() => setShowPayment(true)} />}
-        {activeTab === "inventory" && <InventoryScreen products={products} setProducts={setProducts} />}
+        {activeTab === "inventory" && <InventoryScreen products={products} setProducts={setProducts} autoOpenAdd={autoOpenAdd} onAddOpened={() => setAutoOpenAdd(false)} />}
         {activeTab === "history" && <HistoryScreen sales={sales} />}
       </main>
 
