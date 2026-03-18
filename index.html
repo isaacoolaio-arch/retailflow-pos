@@ -224,13 +224,27 @@ function useOnlineStatus() {
 function useProducts() {
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [source, setSource] = useState("loading"); // "api", "cache", "demo"
+  const [source, setSource] = useState("loading");
+
+  // Merge API products with any locally-added ones not yet in the API
+  const mergeWithLocal = async (apiProducts) => {
+    try {
+      const cached = await dbGetAll("products");
+      const apiIds = new Set(apiProducts.map(p => p.id));
+      // Keep any cached product whose ID is NOT in the API response
+      // (those are locally-added products still awaiting sync)
+      const localOnly = cached.filter(p => !apiIds.has(p.id));
+      return [...apiProducts, ...localOnly];
+    } catch (e) {
+      return apiProducts;
+    }
+  };
 
   useEffect(() => {
     const load = async () => {
       setLoading(true);
 
-      // 1. Try loading from IndexedDB cache first (instant)
+      // 1. Load from IndexedDB cache immediately (instant — no waiting)
       try {
         const cached = await dbGetAll("products");
         if (cached.length > 0) {
@@ -240,23 +254,32 @@ function useProducts() {
         }
       } catch (e) { /* continue */ }
 
-      // 2. Try fetching from API (background refresh)
+      // 2. Background refresh from API — MERGE, never blindly overwrite
       if (api.isConfigured()) {
-        const result = await api.get("getProducts");
-        if (result && result.success && result.products) {
-          setProducts(result.products);
-          setSource("api");
-          // Cache products for offline
-          await dbClear("products");
-          await dbPut("products", result.products);
-          await dbPut("meta", { key: "lastProductSync", value: new Date().toISOString() });
-          setLoading(false);
-          return;
-        }
+        try {
+          const result = await api.get("getProducts");
+          if (result && result.success && result.products) {
+            const merged = await mergeWithLocal(result.products);
+            setProducts(merged);
+            setSource("api");
+            // Write merged list back to IndexedDB
+            await dbClear("products");
+            await dbPut("products", merged);
+            await dbPut("meta", { key: "lastProductSync", value: new Date().toISOString() });
+            setLoading(false);
+            return;
+          }
+        } catch (e) { /* network error — keep showing cache */ }
       }
 
-      // 3. Fallback to demo data if nothing else worked
-      if (products.length === 0) {
+      // 3. Fallback to demo data only if cache AND api both empty
+      try {
+        const cached = await dbGetAll("products");
+        if (cached.length === 0) {
+          setProducts(MOCK_PRODUCTS);
+          setSource("demo");
+        }
+      } catch(e) {
         setProducts(MOCK_PRODUCTS);
         setSource("demo");
       }
@@ -267,13 +290,16 @@ function useProducts() {
 
   const refreshProducts = async () => {
     if (!api.isConfigured()) return;
-    const result = await api.get("getProducts");
-    if (result && result.success && result.products) {
-      setProducts(result.products);
-      setSource("api");
-      await dbClear("products");
-      await dbPut("products", result.products);
-    }
+    try {
+      const result = await api.get("getProducts");
+      if (result && result.success && result.products) {
+        const merged = await mergeWithLocal(result.products);
+        setProducts(merged);
+        setSource("api");
+        await dbClear("products");
+        await dbPut("products", merged);
+      }
+    } catch (e) { /* silent */ }
   };
 
   return { products, setProducts, loading, source, refreshProducts };
@@ -1492,7 +1518,7 @@ function ProductFormModal({ initial, onSave, onDelete, onClose, title }) {
   );
 }
 
-function InventoryScreen({ products, setProducts, autoOpenAdd, onAddOpened }) {
+function InventoryScreen({ products, setProducts, refreshProducts, autoOpenAdd, onAddOpened }) {
   const [search, setSearch] = useState("");
   const [filterType, setFilterType] = useState("all");
   const [showAddForm, setShowAddForm] = useState(false);
@@ -1518,15 +1544,18 @@ function InventoryScreen({ products, setProducts, autoOpenAdd, onAddOpened }) {
 
   const handleAdd = async (saved) => {
     // 1. Update React state immediately (UI responds instantly)
-    const updated = [...products, saved];
-    if (setProducts) setProducts(updated);
+    if (setProducts) setProducts(prev => [...prev, saved]);
     setShowAddForm(false);
     // 2. Save to IndexedDB so it survives page reload / tab switch
     try { await dbPut("products", saved); } catch(e) { console.warn("dbPut failed:", e); }
-    // 3. Persist to Google Sheets if API is configured
+    // 3. Push to Google Sheets if API configured, then refresh so cache reflects confirmed server state
     if (api.isConfigured()) {
-      try { await api.post("addProduct", { ...saved, deviceId: DEVICE_ID }); }
-      catch(e) { console.warn("addProduct API failed:", e); }
+      try {
+        await api.post("addProduct", { ...saved, deviceId: DEVICE_ID });
+        // Small delay so Sheets has time to commit, then pull fresh list
+        await new Promise(r => setTimeout(r, 1500));
+        await refreshProducts();
+      } catch(e) { console.warn("addProduct API failed — saved locally only:", e); }
     }
   };
 
@@ -1534,12 +1563,15 @@ function InventoryScreen({ products, setProducts, autoOpenAdd, onAddOpened }) {
     // 1. Update React state immediately
     if (setProducts) setProducts(prev => prev.map(p => p.id === saved.id ? saved : p));
     setEditingProduct(null);
-    // 2. Update in IndexedDB (put replaces the existing record by id)
+    // 2. Update in IndexedDB
     try { await dbPut("products", saved); } catch(e) { console.warn("dbPut failed:", e); }
-    // 3. Persist to Google Sheets
+    // 3. Push to Google Sheets
     if (api.isConfigured()) {
-      try { await api.post("updateProduct", { ...saved, productId: saved.id, deviceId: DEVICE_ID }); }
-      catch(e) { console.warn("updateProduct API failed:", e); }
+      try {
+        await api.post("updateProduct", { ...saved, productId: saved.id, deviceId: DEVICE_ID });
+        await new Promise(r => setTimeout(r, 1500));
+        await refreshProducts();
+      } catch(e) { console.warn("updateProduct API failed:", e); }
     }
   };
 
@@ -2368,7 +2400,7 @@ function RetailFlowPOS() {
       <main className="flex-1 overflow-hidden">
         {activeTab === "dashboard" && <DashboardScreen sales={sales} products={products} user={user} onNavigate={handleNavigate} />}
         {activeTab === "pos" && <POSScreen products={products} cart={cart} setCart={setCart} onComplete={() => setShowPayment(true)} />}
-        {activeTab === "inventory" && <InventoryScreen products={products} setProducts={setProducts} autoOpenAdd={autoOpenAdd} onAddOpened={() => setAutoOpenAdd(false)} />}
+        {activeTab === "inventory" && <InventoryScreen products={products} setProducts={setProducts} refreshProducts={refreshProducts} autoOpenAdd={autoOpenAdd} onAddOpened={() => setAutoOpenAdd(false)} />}
         {activeTab === "history" && <HistoryScreen sales={sales} />}
       </main>
 
