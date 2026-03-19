@@ -2269,21 +2269,41 @@ function SettingsPanel({ online, source, pendingCount, products, setProducts, se
       const apiProducts = (apiResult && apiResult.success) ? apiResult.products : [];
       const apiIds = new Set(apiProducts.map(p => p.id));
       const cachedProducts = await dbGetAll("products");
-      const localOnly = cachedProducts.filter(p => p.id && !apiIds.has(p.id) && !p.id.startsWith("P00") && !p.id.startsWith("W00") && !p.id.startsWith("PC0") && !p.id.startsWith("V00"));
+
+      // A product needs pushing if its ID is not in Sheets at all
+      // Skip only the known MOCK/demo IDs that ship with the app
+      const DEMO_IDS = new Set([
+        "P001","P002","P003","P004","P005",
+        "W001","W002","W003","W004","W005","W006","W007","W008",
+        "PC01","PC02","PC03","PC04",
+        "V001","V002","V003"
+      ]);
+      const localOnly = cachedProducts.filter(p =>
+        p.id &&
+        !apiIds.has(p.id) &&      // not already in Sheets
+        !DEMO_IDS.has(p.id) &&    // not a demo product
+        p.name                    // must have a name
+      );
 
       if (localOnly.length === 0) {
-        log("No local-only products to push", "ok");
+        log(`All ${cachedProducts.length} local product(s) already in Sheets ✓`, "ok");
       } else {
-        log(`Found ${localOnly.length} local product(s) not in Sheets — pushing...`);
+        log(`Found ${localOnly.length} product(s) not yet in Sheets — pushing now...`);
         let prodSynced = 0;
         for (const p of localOnly) {
           try {
             const r = await api.post("addProduct", { ...p, deviceId: DEVICE_ID });
-            if (r && r.success) { prodSynced++; log(`  ✓ ${p.name}`, "ok"); }
-            else { log(`  ✗ ${p.name} — ${r && r.error ? r.error : "unknown error"}`, "error"); }
-          } catch (e) { log(`  ✗ ${p.name} — ${e.message}`, "error"); }
+            if (r && r.success) {
+              prodSynced++;
+              log(`  ✓ ${p.name} (${p.id})`, "ok");
+            } else {
+              log(`  ✗ ${p.name} — ${r && r.error ? r.error : "no response from server"}`, "error");
+            }
+          } catch (e) {
+            log(`  ✗ ${p.name} — ${e.message}`, "error");
+          }
         }
-        log(`Products pushed: ${prodSynced}/${localOnly.length}`, prodSynced === localOnly.length ? "ok" : "warn");
+        log(`Products pushed: ${prodSynced} / ${localOnly.length}`, prodSynced === localOnly.length ? "ok" : "warn");
       }
     } catch (e) {
       log("Product check error: " + e.message, "error");
