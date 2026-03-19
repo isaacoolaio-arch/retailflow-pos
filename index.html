@@ -125,16 +125,24 @@ const api = {
     }
   },
 
+  // ── CRITICAL: Content-Type must be "text/plain" for Apps Script ──
+  // Apps Script 302-redirects cross-origin requests. Browsers convert
+  // POST→GET when following a 302, dropping the body entirely, so
+  // doPost() never fires. Using text/plain avoids the CORS preflight
+  // and sends the POST body directly — doPost() receives it correctly.
   async post(action, data = {}) {
     if (!API_URL) return null;
     try {
+      const body = JSON.stringify({ action, ...data, deviceId: DEVICE_ID });
       const res = await fetch(API_URL, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action, ...data, deviceId: DEVICE_ID }),
+        headers: { "Content-Type": "text/plain;charset=utf-8" },
+        body,
         redirect: "follow"
       });
-      return await res.json();
+      const text = await res.text();
+      try { return JSON.parse(text); }
+      catch (e) { console.warn("API POST non-JSON response:", text); return null; }
     } catch (e) {
       console.warn("API POST failed:", e);
       return null;
@@ -1766,15 +1774,50 @@ function LoginScreen({ onLogin }) {
   const [pin, setPin] = useState("");
   const [shake, setShake] = useState(false);
   const [user, setUser] = useState("Cashier");
+  const [checking, setChecking] = useState(false);
+  const [error, setError] = useState("");
 
-  const handleKey = (k) => {
-    if (k === "DEL") return setPin(p => p.slice(0, -1));
+  const handleKey = async (k) => {
+    if (k === "DEL") { setPin(p => p.slice(0, -1)); setError(""); return; }
     if (k === "OK") {
-      if (pin.length >= 4) onLogin({ name: user, role: user.toLowerCase() });
-      else { setShake(true); setTimeout(() => setShake(false), 500); }
+      if (pin.length < 4) { setShake(true); setTimeout(() => setShake(false), 500); return; }
+      setChecking(true);
+      setError("");
+
+      // Try API validation first
+      if (api.isConfigured()) {
+        try {
+          const result = await api.post("login", { username: user, pin });
+          if (result && result.success) {
+            setChecking(false);
+            onLogin(result.user); // { id, name, role } from Google Sheets
+            return;
+          } else {
+            setError("Wrong PIN. Try again.");
+            setPin("");
+            setShake(true);
+            setTimeout(() => setShake(false), 500);
+            setChecking(false);
+            return;
+          }
+        } catch (e) { /* fall through to offline login */ }
+      }
+
+      // Offline fallback — accept PIN locally
+      const offlineUsers = { Admin: "1234", Manager: "5678", Cashier: "0000" };
+      if (offlineUsers[user] === pin || !api.isConfigured()) {
+        setChecking(false);
+        onLogin({ id: user.toLowerCase(), name: user, role: user });
+      } else {
+        setError("Wrong PIN. Try again.");
+        setPin("");
+        setShake(true);
+        setTimeout(() => setShake(false), 500);
+        setChecking(false);
+      }
       return;
     }
-    if (pin.length < 6) setPin(p => p + k);
+    if (pin.length < 6) { setPin(p => p + k); setError(""); }
   };
 
   return (
@@ -1799,12 +1842,14 @@ function LoginScreen({ onLogin }) {
         </div>
         <div className="grid grid-cols-3 gap-3">
           {["1","2","3","4","5","6","7","8","9","DEL","0","OK"].map(k => (
-            <button key={k} onClick={() => handleKey(k)} className={`h-14 rounded-xl font-semibold text-lg transition-all active:scale-95 ${k === "OK" ? "bg-amber-500 text-zinc-900 hover:bg-amber-400 shadow-lg shadow-amber-500/20" : k === "DEL" ? "bg-zinc-800 text-zinc-400 hover:bg-zinc-700" : "bg-zinc-900 text-zinc-200 hover:bg-zinc-800 border border-zinc-800"}`}>
-              {k === "DEL" ? "⌫" : k}
+            <button key={k} onClick={() => handleKey(k)} disabled={checking}
+              className={`h-14 rounded-xl font-semibold text-lg transition-all active:scale-95 disabled:opacity-50 ${k === "OK" ? "bg-amber-500 text-zinc-900 hover:bg-amber-400 shadow-lg shadow-amber-500/20" : k === "DEL" ? "bg-zinc-800 text-zinc-400 hover:bg-zinc-700" : "bg-zinc-900 text-zinc-200 hover:bg-zinc-800 border border-zinc-800"}`}>
+              {k === "DEL" ? "⌫" : k === "OK" && checking ? <span className="inline-block w-5 h-5 border-2 border-zinc-900 border-t-transparent rounded-full animate-spin" /> : k}
             </button>
           ))}
         </div>
-        <p className="text-center text-zinc-600 text-xs mt-6">Enter any 4-digit PIN to continue</p>
+        {error && <p className="text-center text-red-400 text-sm mt-4 font-medium">{error}</p>}
+        <p className="text-center text-zinc-600 text-xs mt-4">{api.isConfigured() ? "PIN validated against your Google Sheet" : "Offline mode — using default PINs"}</p>
       </div>
     </div>
   );
