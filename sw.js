@@ -1,4 +1,4 @@
-var CACHE_NAME = 'oola-retailflow-v9';
+var CACHE_NAME = 'oola-retailflow-v10';
 
 // ALL assets needed to run the app offline — cached during install
 var CORE_ASSETS = [
