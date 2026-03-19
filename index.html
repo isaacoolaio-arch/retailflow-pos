@@ -2202,6 +2202,216 @@ function SideDrawer({ open, onClose, user, activeTab, onNavigate, onLogout, onli
   );
 }
 
+// ═══════════════════════════════════════════════════════════════
+// Settings + Data Recovery Panel
+// ═══════════════════════════════════════════════════════════════
+function SettingsPanel({ online, source, pendingCount, products, setProducts, setSales, setPendingCount, refreshProducts, onSync, onClose }) {
+  const [recovering, setRecovering] = useState(false);
+  const [recoverLog, setRecoverLog] = useState([]);
+  const [localStats, setLocalStats] = useState(null);
+  const [recovered, setRecovered] = useState(false);
+
+  // Load local stats on open
+  useEffect(() => {
+    const load = async () => {
+      const pending = await dbGetAll("pendingSales");
+      const cached  = await dbGetAll("products");
+      setLocalStats({ pendingSales: pending.length, cachedProducts: cached.length });
+    };
+    load();
+  }, []);
+
+  const log = (msg, type) => setRecoverLog(prev => [...prev, { msg, type: type || "info", t: new Date().toLocaleTimeString() }]);
+
+  const handleRecoverAll = async () => {
+    if (!online || !api.isConfigured()) {
+      log("You must be online to recover data", "error");
+      return;
+    }
+    setRecovering(true);
+    setRecoverLog([]);
+    let totalSynced = 0;
+    let totalFailed = 0;
+
+    // ── 1. Recover pending sales ────────────────────────────────
+    log("Reading pending sales from device...");
+    const pendingSales = await dbGetAll("pendingSales");
+    if (pendingSales.length === 0) {
+      log("No pending sales found locally", "ok");
+    } else {
+      log(`Found ${pendingSales.length} pending sale(s) — pushing to Sheets...`);
+      try {
+        const result = await api.post("syncSales", { sales: pendingSales });
+        if (result && result.success) {
+          for (const r of (result.results || [])) {
+            if (r.success && r.offlineId) {
+              await dbDelete("pendingSales", r.offlineId);
+              totalSynced++;
+            } else {
+              totalFailed++;
+            }
+          }
+          log(`✓ Sales synced: ${result.synced || 0}, failed: ${result.failed || 0}`, result.synced > 0 ? "ok" : "warn");
+          const remaining = await dbGetAll("pendingSales");
+          setPendingCount(remaining.length);
+        } else {
+          log("Sales sync returned no result — check API URL", "error");
+        }
+      } catch (e) {
+        log("Sales sync error: " + e.message, "error");
+      }
+    }
+
+    // ── 2. Recover locally-added products not in Sheets ─────────
+    log("Checking for local-only products...");
+    try {
+      const apiResult = await api.get("getProducts");
+      const apiProducts = (apiResult && apiResult.success) ? apiResult.products : [];
+      const apiIds = new Set(apiProducts.map(p => p.id));
+      const cachedProducts = await dbGetAll("products");
+      const localOnly = cachedProducts.filter(p => p.id && !apiIds.has(p.id) && !p.id.startsWith("P00") && !p.id.startsWith("W00") && !p.id.startsWith("PC0") && !p.id.startsWith("V00"));
+
+      if (localOnly.length === 0) {
+        log("No local-only products to push", "ok");
+      } else {
+        log(`Found ${localOnly.length} local product(s) not in Sheets — pushing...`);
+        let prodSynced = 0;
+        for (const p of localOnly) {
+          try {
+            const r = await api.post("addProduct", { ...p, deviceId: DEVICE_ID });
+            if (r && r.success) { prodSynced++; log(`  ✓ ${p.name}`, "ok"); }
+            else { log(`  ✗ ${p.name} — ${r && r.error ? r.error : "unknown error"}`, "error"); }
+          } catch (e) { log(`  ✗ ${p.name} — ${e.message}`, "error"); }
+        }
+        log(`Products pushed: ${prodSynced}/${localOnly.length}`, prodSynced === localOnly.length ? "ok" : "warn");
+      }
+    } catch (e) {
+      log("Product check error: " + e.message, "error");
+    }
+
+    // ── 3. Pull fresh data from Sheets ──────────────────────────
+    log("Pulling fresh data from Sheets...");
+    try {
+      await refreshProducts();
+      log("✓ Products refreshed from Sheets", "ok");
+    } catch (e) { log("Refresh failed: " + e.message, "error"); }
+
+    const stats = await dbGetAll("pendingSales");
+    setLocalStats(prev => ({ ...prev, pendingSales: stats.length }));
+    setRecovered(true);
+    setRecovering(false);
+    log("─── Recovery complete ───", "ok");
+  };
+
+  const typeColor = t => t === "ok" ? "text-emerald-400" : t === "error" ? "text-red-400" : t === "warn" ? "text-amber-400" : "text-zinc-400";
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/60 flex items-end" onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="w-full bg-zinc-900 border-t border-zinc-700/60 rounded-t-3xl max-h-[85vh] flex flex-col">
+        {/* Handle */}
+        <div className="flex justify-center pt-3 pb-1 flex-shrink-0"><div className="w-10 h-1 bg-zinc-700 rounded-full" /></div>
+
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-3 border-b border-zinc-800 flex-shrink-0">
+          <h2 className="text-base font-bold text-zinc-100" style={{fontFamily:"'DM Sans',sans-serif"}}>Settings & Data Recovery</h2>
+          <button onClick={onClose} className="w-8 h-8 rounded-full bg-zinc-800 flex items-center justify-center text-zinc-400">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
+          {/* Status cards */}
+          <div className="grid grid-cols-2 gap-3">
+            <div className="bg-zinc-800/60 rounded-xl p-3 border border-zinc-700/30">
+              <p className="text-xs text-zinc-500">Connection</p>
+              <p className={`text-sm font-bold mt-0.5 ${online ? "text-emerald-400" : "text-red-400"}`}>{online ? "🟢 Online" : "🔴 Offline"}</p>
+            </div>
+            <div className="bg-zinc-800/60 rounded-xl p-3 border border-zinc-700/30">
+              <p className="text-xs text-zinc-500">Data Source</p>
+              <p className={`text-sm font-bold mt-0.5 ${source === "api" ? "text-emerald-400" : source === "cache" ? "text-blue-400" : "text-zinc-400"}`}>
+                {source === "api" ? "Live" : source === "cache" ? "Cached" : "Demo"}
+              </p>
+            </div>
+            <div className={`rounded-xl p-3 border ${pendingCount > 0 ? "bg-amber-500/10 border-amber-500/30" : "bg-zinc-800/60 border-zinc-700/30"}`}>
+              <p className="text-xs text-zinc-500">Pending Sales</p>
+              <p className={`text-sm font-bold mt-0.5 ${pendingCount > 0 ? "text-amber-400" : "text-emerald-400"}`}>
+                {pendingCount > 0 ? `${pendingCount} unsynced` : "All synced ✓"}
+              </p>
+            </div>
+            <div className="bg-zinc-800/60 rounded-xl p-3 border border-zinc-700/30">
+              <p className="text-xs text-zinc-500">Local Products</p>
+              <p className="text-sm font-bold text-zinc-300 mt-0.5">{localStats ? localStats.cachedProducts : "—"} cached</p>
+            </div>
+          </div>
+
+          {/* API URL */}
+          <div className="bg-zinc-800/50 rounded-xl p-3">
+            <p className="text-xs text-zinc-500 mb-1">API URL</p>
+            <p className="text-xs text-zinc-400 font-mono break-all leading-relaxed">
+              {API_URL || "⚠ Not configured — set API_URL in index.html"}
+            </p>
+          </div>
+
+          {/* Recovery section */}
+          <div className="bg-amber-500/8 border border-amber-500/25 rounded-xl p-4 space-y-3">
+            <div>
+              <p className="text-sm font-bold text-amber-400">🔄 Data Recovery</p>
+              <p className="text-xs text-zinc-400 mt-1 leading-relaxed">
+                Push all locally-stored data that hasn't reached Google Sheets yet — pending sales and locally-added products.
+              </p>
+            </div>
+
+            {recoverLog.length > 0 && (
+              <div className="bg-zinc-950 rounded-lg p-3 max-h-48 overflow-y-auto space-y-1">
+                {recoverLog.map((l, i) => (
+                  <p key={i} className={`text-xs font-mono ${typeColor(l.type)}`}>
+                    <span className="text-zinc-600">{l.t} </span>{l.msg}
+                  </p>
+                ))}
+                {recovering && <p className="text-xs text-amber-400 animate-pulse font-mono">Working...</p>}
+              </div>
+            )}
+
+            <button
+              onClick={handleRecoverAll}
+              disabled={recovering || !online || !api.isConfigured()}
+              className={`w-full py-3.5 rounded-xl font-bold text-sm flex items-center justify-center gap-2 active:scale-95 transition-all ${
+                recovered ? "bg-emerald-600 text-white" :
+                recovering ? "bg-zinc-700 text-zinc-400" :
+                !online ? "bg-zinc-800 text-zinc-500" :
+                "bg-amber-500 text-zinc-900 shadow-lg shadow-amber-500/20"
+              }`}
+            >
+              {recovering ? (
+                <><span className="w-4 h-4 border-2 border-zinc-500 border-t-zinc-200 rounded-full animate-spin" /> Recovering...</>
+              ) : recovered ? (
+                <>✓ Recovery Complete</>
+              ) : !online ? (
+                <>Go online to recover</>
+              ) : (
+                <>⬆ Push All Local Data to Sheets</>
+              )}
+            </button>
+            {!api.isConfigured() && <p className="text-xs text-red-400 text-center">API URL not set — cannot sync</p>}
+          </div>
+
+          {/* Quick sync */}
+          <div className="flex gap-3 pb-4">
+            <button onClick={() => { onSync(); onClose(); }} disabled={!online}
+              className="flex-1 py-3 rounded-xl bg-zinc-800 border border-zinc-700 text-zinc-300 font-medium text-sm flex items-center justify-center gap-1.5 disabled:opacity-40 active:scale-95 transition-all">
+              <svg width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M21 12a9 9 0 11-6.219-8.56"/></svg>
+              Quick Sync
+            </button>
+            <button onClick={onClose} className="flex-1 py-3 rounded-xl bg-zinc-800 border border-zinc-700 text-zinc-300 font-medium text-sm active:scale-95 transition-all">
+              Close
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function RetailFlowPOS() {
   const [loggedIn, setLoggedIn] = useState(false);
   const [user, setUser] = useState(null);
@@ -2390,48 +2600,14 @@ function RetailFlowPOS() {
 
       {/* Settings Dropdown */}
       {showSettings && (
-        <div className="absolute right-4 top-14 z-40 w-72 bg-zinc-900 border border-zinc-700 rounded-2xl shadow-2xl p-4 space-y-3">
-          <h3 className="text-sm font-bold text-zinc-200">Settings</h3>
-
-          <div>
-            <label className="text-xs text-zinc-500 block mb-1">API URL (Apps Script Web App)</label>
-            <div className="bg-zinc-800 rounded-lg p-2 text-xs text-zinc-400 font-mono break-all">
-              {API_URL || "Not configured — using demo mode"}
-            </div>
-            <p className="text-xs text-zinc-600 mt-1">Set API_URL in the code to connect to your Google Sheet</p>
-          </div>
-
-          <div className="flex items-center justify-between">
-            <span className="text-xs text-zinc-400">Connection</span>
-            <span className={`text-xs font-medium ${online ? "text-emerald-400" : "text-red-400"}`}>{online ? "Online" : "Offline"}</span>
-          </div>
-
-          <div className="flex items-center justify-between">
-            <span className="text-xs text-zinc-400">Data Source</span>
-            <span className="text-xs font-medium text-zinc-300">{source === "api" ? "Live (Google Sheets)" : source === "cache" ? "Cached (IndexedDB)" : "Demo Data"}</span>
-          </div>
-
-          <div className="flex items-center justify-between">
-            <span className="text-xs text-zinc-400">Pending Sales</span>
-            <span className={`text-xs font-medium ${pendingCount > 0 ? "text-amber-400" : "text-emerald-400"}`}>{pendingCount > 0 ? `${pendingCount} awaiting sync` : "All synced ✓"}</span>
-          </div>
-
-          <div className="flex items-center justify-between">
-            <span className="text-xs text-zinc-400">Device ID</span>
-            <span className="text-xs text-zinc-500 font-mono">{DEVICE_ID}</span>
-          </div>
-
-          <div className="flex gap-2 pt-2 border-t border-zinc-800">
-            <button onClick={() => { handleManualSync(); setShowSettings(false); }}
-              className="flex-1 py-2 rounded-lg bg-amber-500/20 text-amber-400 text-xs font-medium hover:bg-amber-500/30 transition-all">
-              ↻ Sync Now
-            </button>
-            <button onClick={() => setShowSettings(false)}
-              className="flex-1 py-2 rounded-lg bg-zinc-800 text-zinc-400 text-xs font-medium hover:bg-zinc-700 transition-all">
-              Close
-            </button>
-          </div>
-        </div>
+        <SettingsPanel
+          online={online} source={source} pendingCount={pendingCount}
+          products={products} setProducts={setProducts}
+          setSales={setSales} setPendingCount={setPendingCount}
+          refreshProducts={refreshProducts}
+          onSync={() => { handleManualSync(); }}
+          onClose={() => setShowSettings(false)}
+        />
       )}
 
       {/* Loading indicator */}
