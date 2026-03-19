@@ -1171,18 +1171,21 @@ function POSScreen({ products, cart, setCart, onComplete }) {
   const handleBarcodeScan = () => {
     if (!barcodeInput.trim()) return;
     const query = barcodeInput.trim();
-    // Try barcode match first
-    let found = products.find(p => p.barcode && p.barcode === query);
-    // Then try product ID match
-    if (!found) found = products.find(p => p.id.toLowerCase() === query.toLowerCase());
-    // Then try name match
+    const norm = (v) => String(v || "").trim();
+
+    // Try barcode match — normalise both sides to string to handle numeric barcodes from Sheets
+    let found = products.find(p => p.barcode && norm(p.barcode) === norm(query));
+    // Then try product ID
+    if (!found) found = products.find(p => norm(p.id).toLowerCase() === norm(query).toLowerCase());
+    // Then try name
     if (!found) found = products.find(p => p.name.toLowerCase().includes(query.toLowerCase()));
+
     if (found) {
       handleProductTap(found);
       setBarcodeInput("");
     } else {
-      // Flash the input red briefly to indicate not found
-      alert("Product not found: " + query);
+      playBeep("error");
+      showToast("Barcode " + query + " not found — add it in Stock tab first", "warn");
     }
   };
 
@@ -1311,7 +1314,19 @@ function POSScreen({ products, cart, setCart, onComplete }) {
         </div>
       )}
 
-      {showBarcodeScanner && <BarcodeScannerModal onScan={function(code) { setShowBarcodeScanner(false); setBarcodeInput(code); var found = products.find(function(p){return p.barcode && p.barcode === code;}); if(found){handleProductTap(found);} else { playBeep("error"); showToast("Barcode " + code + " not found — add it in Stock tab first", "warn"); } }} onClose={function(){setShowBarcodeScanner(false);}} />}
+      {showBarcodeScanner && <BarcodeScannerModal onScan={function(code) {
+        setShowBarcodeScanner(false);
+        setBarcodeInput(code);
+        var norm = function(v){ return String(v || "").trim(); };
+        var found = products.find(function(p){ return p.barcode && norm(p.barcode) === norm(code); });
+        if (!found) found = products.find(function(p){ return norm(p.id).toLowerCase() === norm(code).toLowerCase(); });
+        if (found) {
+          handleProductTap(found);
+        } else {
+          playBeep("error");
+          showToast("Barcode " + code + " not found — add it in Stock tab first", "warn");
+        }
+      }} onClose={function(){setShowBarcodeScanner(false);}} />}
       {weightModal && <WeightEntryModal product={weightModal} onAdd={(w, t) => addWeightProduct(weightModal, w, t)} onClose={() => setWeightModal(null)} />}
       {pieceModal && <PieceEntryModal product={pieceModal} onAdd={(c, t) => addPieceProduct(pieceModal, c, t)} onClose={() => setPieceModal(null)} />}
       {variantModal && <VariantModal product={variantModal} onAdd={(vi, q, t) => addVariantProduct(variantModal, vi, q, t)} onClose={() => setVariantModal(null)} />}
