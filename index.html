@@ -108,6 +108,14 @@ async function dbClear(storeName) {
 
 // ─── API Service ──────────────────────────────────────────────
 
+// Wraps a fetch promise with a timeout
+function fetchWithTimeout(promise, ms) {
+  const timeout = new Promise((_, reject) =>
+    setTimeout(() => reject(new Error("timeout")), ms)
+  );
+  return Promise.race([promise, timeout]);
+}
+
 const api = {
   isConfigured: () => !!API_URL,
 
@@ -117,10 +125,13 @@ const api = {
     url.searchParams.set("action", action);
     Object.keys(params).forEach(k => url.searchParams.set(k, params[k]));
     try {
-      const res = await fetch(url.toString(), { redirect: "follow" });
+      const res = await fetchWithTimeout(
+        fetch(url.toString(), { redirect: "follow" }),
+        8000  // 8 second timeout
+      );
       return await res.json();
     } catch (e) {
-      console.warn("API GET failed:", e);
+      console.warn("API GET failed:", e.message);
       return null;
     }
   },
@@ -134,17 +145,20 @@ const api = {
     if (!API_URL) return null;
     try {
       const body = JSON.stringify({ action, ...data, deviceId: DEVICE_ID });
-      const res = await fetch(API_URL, {
-        method: "POST",
-        headers: { "Content-Type": "text/plain;charset=utf-8" },
-        body,
-        redirect: "follow"
-      });
+      const res = await fetchWithTimeout(
+        fetch(API_URL, {
+          method: "POST",
+          headers: { "Content-Type": "text/plain;charset=utf-8" },
+          body,
+          redirect: "follow"
+        }),
+        10000  // 10 second timeout
+      );
       const text = await res.text();
       try { return JSON.parse(text); }
       catch (e) { console.warn("API POST non-JSON response:", text); return null; }
     } catch (e) {
-      console.warn("API POST failed:", e);
+      console.warn("API POST failed:", e.message);
       return null;
     }
   }
@@ -1784,44 +1798,36 @@ function LoginScreen({ onLogin }) {
       setChecking(true);
       setError("");
 
-      // Try API validation first
+      // ── 1. Try API login (background) ───────────────────────────
       if (api.isConfigured()) {
         try {
           const result = await api.post("login", { username: user, pin });
-
-          if (result === null || result === undefined) {
-            // API call failed entirely (network error, null response)
-            // → fall through silently to offline fallback below
-          } else if (result.success) {
+          if (result && result.success && result.user) {
             setChecking(false);
             onLogin(result.user);
             return;
-          } else {
-            // API responded but said wrong credentials — show error, don't fall through
-            setError("Wrong PIN. Try again.");
-            setPin("");
-            setShake(true);
-            setTimeout(() => setShake(false), 500);
-            setChecking(false);
-            return;
           }
-        } catch (e) { /* fall through to offline login */ }
+          // If API returned success:false, fall through to offline check
+          // (API may have column issues or PIN format mismatch — offline is the safety net)
+        } catch (e) { /* network error — fall through */ }
       }
 
-      // Offline fallback — works when API is unreachable or not configured
-      // Also accepts single-digit "0" stored in Sheets by padding with trimEnd
-      const offlineUsers = { Admin: "1234", Manager: "5678", Cashier: "0000" };
-      const pinMatch = offlineUsers[user] === pin;
-      if (pinMatch || !api.isConfigured()) {
+      // ── 2. Offline fallback (always runs if API didn't succeed) ──
+      // Matches PIN against known defaults AND the selected role
+      const offlineMap = { Admin: ["1234"], Manager: ["5678"], Cashier: ["0000", "0"] };
+      const validPins = offlineMap[user] || [];
+      if (validPins.includes(pin) || validPins.includes(pin.replace(/^0+/, "") || "0")) {
         setChecking(false);
         onLogin({ id: user.toLowerCase(), name: user, role: user });
-      } else {
-        setError("Wrong PIN. Try again.");
-        setPin("");
-        setShake(true);
-        setTimeout(() => setShake(false), 500);
-        setChecking(false);
+        return;
       }
+
+      // ── 3. Both failed ────────────────────────────────────────────
+      setError("Wrong PIN. Try again.");
+      setPin("");
+      setShake(true);
+      setTimeout(() => setShake(false), 500);
+      setChecking(false);
       return;
     }
     if (pin.length < 6) { setPin(p => p + k); setError(""); }
@@ -1849,14 +1855,17 @@ function LoginScreen({ onLogin }) {
         </div>
         <div className="grid grid-cols-3 gap-3">
           {["1","2","3","4","5","6","7","8","9","DEL","0","OK"].map(k => (
-            <button key={k} onClick={() => handleKey(k)} disabled={checking}
-              className={`h-14 rounded-xl font-semibold text-lg transition-all active:scale-95 disabled:opacity-50 ${k === "OK" ? "bg-amber-500 text-zinc-900 hover:bg-amber-400 shadow-lg shadow-amber-500/20" : k === "DEL" ? "bg-zinc-800 text-zinc-400 hover:bg-zinc-700" : "bg-zinc-900 text-zinc-200 hover:bg-zinc-800 border border-zinc-800"}`}>
-              {k === "DEL" ? "⌫" : k === "OK" && checking ? <span className="inline-block w-5 h-5 border-2 border-zinc-900 border-t-transparent rounded-full animate-spin" /> : k}
+            <button key={k} onClick={() => handleKey(k)}
+              className={`h-14 rounded-xl font-semibold text-lg transition-all active:scale-95 ${k === "OK" ? "bg-amber-500 text-zinc-900 hover:bg-amber-400 shadow-lg shadow-amber-500/20" : k === "DEL" ? "bg-zinc-800 text-zinc-400 hover:bg-zinc-700" : "bg-zinc-900 text-zinc-200 hover:bg-zinc-800 border border-zinc-800"}`}>
+              {k === "OK" && checking
+                ? <span className="inline-block w-5 h-5 border-2 border-zinc-900 border-t-transparent rounded-full animate-spin" />
+                : k === "DEL" ? "⌫" : k}
             </button>
           ))}
         </div>
         {error && <p className="text-center text-red-400 text-sm mt-4 font-medium">{error}</p>}
-        <p className="text-center text-zinc-600 text-xs mt-4">{api.isConfigured() ? "PIN validated against your Google Sheet" : "Offline mode — using default PINs"}</p>
+        {checking && !error && <p className="text-center text-amber-400 text-xs mt-4">Checking...</p>}
+        <p className="text-center text-zinc-600 text-xs mt-3">{api.isConfigured() ? "PIN validated against your Google Sheet" : "Offline mode — using default PINs"}</p>
       </div>
     </div>
   );
