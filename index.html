@@ -152,7 +152,7 @@ const api = {
           body,
           redirect: "follow"
         }),
-        10000  // 10 second timeout
+        35000  // 35 second timeout — Apps Script cold start can take 20–30s
       );
       const text = await res.text();
       try { return JSON.parse(text); }
@@ -253,9 +253,8 @@ function useProducts() {
     try {
       const cached = await dbGetAll("products");
       const apiIds = new Set(apiProducts.map(p => p.id));
-      // Keep any cached product whose ID is NOT in the API response
-      // (those are locally-added products still awaiting sync)
-      const localOnly = cached.filter(p => !apiIds.has(p.id));
+      // Keep cached products not in API, but never include demo products
+      const localOnly = cached.filter(p => !apiIds.has(p.id) && !DEMO_IDS.has(p.id));
       return [...apiProducts, ...localOnly];
     } catch (e) {
       return apiProducts;
@@ -266,7 +265,8 @@ function useProducts() {
     const load = async () => {
       setLoading(true);
 
-      // 1. Load from IndexedDB cache immediately (instant — no waiting)
+      // Remove any demo/mock data from IndexedDB before loading
+      await cleanupDemoData();
       try {
         const cached = await dbGetAll("products");
         if (cached.length > 0) {
@@ -294,16 +294,19 @@ function useProducts() {
         } catch (e) { /* network error — keep showing cache */ }
       }
 
-      // 3. Fallback to demo data only if cache AND api both empty
-      try {
-        const cached = await dbGetAll("products");
-        if (cached.length === 0) {
+      // 3. Fallback to demo data ONLY if API is NOT configured (offline/unconfigured)
+      // When API is configured but returns empty, show empty — not fake demo data
+      if (!api.isConfigured()) {
+        try {
+          const cached = await dbGetAll("products");
+          if (cached.length === 0) {
+            setProducts(MOCK_PRODUCTS);
+            setSource("demo");
+          }
+        } catch(e) {
           setProducts(MOCK_PRODUCTS);
           setSource("demo");
         }
-      } catch(e) {
-        setProducts(MOCK_PRODUCTS);
-        setSource("demo");
       }
       setLoading(false);
     };
@@ -327,7 +330,34 @@ function useProducts() {
   return { products, setProducts, loading, source, refreshProducts };
 }
 
-// ─── Product Types ────────────────────────────────────────────
+// ─── Demo data cleanup ────────────────────────────────────────
+// When API is configured, purge any demo/mock products and stale
+// sales from IndexedDB so they never appear in the real app.
+const DEMO_IDS = new Set([
+  "P001","P002","P003","P004","P005","P006","P007","P008",
+  "W001","W002","W003","W004","W005","W006","W007","W008",
+  "PC01","PC02","PC03","PC04",
+  "V001","V002","V003"
+]);
+
+async function cleanupDemoData() {
+  if (!api.isConfigured()) return;
+  try {
+    // Remove any demo products from the products cache
+    const cached = await dbGetAll("products");
+    const hasDemoProducts = cached.some(p => DEMO_IDS.has(p.id));
+    if (hasDemoProducts) {
+      const real = cached.filter(p => !DEMO_IDS.has(p.id));
+      await dbClear("products");
+      if (real.length > 0) await dbPut("products", real);
+      console.log("[cleanup] Removed demo products from IndexedDB cache");
+    }
+    // Remove any demo/fake sales (those with OFF_ IDs that were never real)
+    // We don't touch pendingSales — those are legitimate offline sales
+  } catch (e) { /* silent */ }
+}
+
+
 // "barcode"  → scan/type barcode, add by unit
 // "weight"   → tap product, enter weight (kg), price = rate × weight
 // "piece"    → tap product, enter count (pieces)
@@ -2305,18 +2335,27 @@ function SettingsPanel({ online, source, pendingCount, products, setProducts, se
         log(`All ${cachedProducts.length} local product(s) already in Sheets ✓`, "ok");
       } else {
         log(`Found ${localOnly.length} product(s) not yet in Sheets — pushing now...`);
+        log(`Note: First push may take 30+ seconds (Apps Script cold start)`, "info");
         let prodSynced = 0;
         for (const p of localOnly) {
-          try {
-            const r = await api.post("addProduct", { ...p, deviceId: DEVICE_ID });
-            if (r && r.success) {
-              prodSynced++;
-              log(`  ✓ ${p.name} (${p.id})`, "ok");
-            } else {
-              log(`  ✗ ${p.name} — ${r && r.error ? r.error : "no response from server"}`, "error");
-            }
-          } catch (e) {
-            log(`  ✗ ${p.name} — ${e.message}`, "error");
+          log(`  Pushing: ${p.name}...`);
+          let r = null;
+          // Try up to 2 times — Apps Script cold start can cause first attempt to timeout
+          for (let attempt = 1; attempt <= 2; attempt++) {
+            try {
+              r = await api.post("addProduct", { ...p, deviceId: DEVICE_ID });
+              if (r && r.success) break;
+              if (attempt === 1 && !r) {
+                log(`  Retrying ${p.name} (attempt 2)...`);
+                await new Promise(res => setTimeout(res, 2000));
+              }
+            } catch (e) { /* continue to next attempt */ }
+          }
+          if (r && r.success) {
+            prodSynced++;
+            log(`  ✓ ${p.name} saved (ID: ${r.productId || p.id})`, "ok");
+          } else {
+            log(`  ✗ ${p.name} — ${r && r.error ? r.error : "server did not respond after 2 attempts"}`, "error");
           }
         }
         log(`Products pushed: ${prodSynced} / ${localOnly.length}`, prodSynced === localOnly.length ? "ok" : "warn");
@@ -2467,20 +2506,25 @@ function RetailFlowPOS() {
   // Load sales from cache on startup
   useEffect(() => {
     const loadSales = async () => {
-      try {
-        const cached = await dbGetAll("syncedSales");
-        if (cached.length > 0) setSales(cached);
-      } catch (e) { /* ignore */ }
-
-      // Also try from API
       if (api.isConfigured()) {
+        // API is configured — always pull from Sheets (source of truth)
+        // Clear any stale cached sales first so demo/old data never shows
+        await dbClear("syncedSales");
         const today = new Date().toISOString().split("T")[0];
         const result = await api.get("getSales", { date: today, limit: "200" });
         if (result && result.success) {
-          setSales(result.sales);
-          await dbClear("syncedSales");
-          await dbPut("syncedSales", result.sales);
+          setSales(result.sales || []);
+          await dbPut("syncedSales", result.sales || []);
+        } else {
+          // API failed — show empty, not stale cache
+          setSales([]);
         }
+      } else {
+        // No API — load from local cache only
+        try {
+          const cached = await dbGetAll("syncedSales");
+          if (cached.length > 0) setSales(cached);
+        } catch (e) { /* ignore */ }
       }
     };
     if (loggedIn) loadSales();
