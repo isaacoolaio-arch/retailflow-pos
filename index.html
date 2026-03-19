@@ -243,6 +243,16 @@ function useOnlineStatus() {
 
 // ─── Data Loading Hook ────────────────────────────────────────
 
+// Force barcode (and id) to string — Google Sheets stores numeric barcodes
+// as numbers, which breaks strict === comparison with the scanner string output.
+function normaliseProduct(p) {
+  return p ? { ...p, id: String(p.id || ""), barcode: String(p.barcode || "").trim() } : p;
+}
+
+function normaliseProducts(arr) {
+  return (arr || []).map(normaliseProduct);
+}
+
 function useProducts() {
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -252,9 +262,9 @@ function useProducts() {
   const mergeWithLocal = async (apiProducts) => {
     try {
       const cached = await dbGetAll("products");
+      const normCached = normaliseProducts(cached);
       const apiIds = new Set(apiProducts.map(p => p.id));
-      // Keep cached products not in API, but never include demo products
-      const localOnly = cached.filter(p => !apiIds.has(p.id) && !DEMO_IDS.has(p.id));
+      const localOnly = normCached.filter(p => !apiIds.has(p.id) && !DEMO_IDS.has(p.id));
       return [...apiProducts, ...localOnly];
     } catch (e) {
       return apiProducts;
@@ -267,24 +277,27 @@ function useProducts() {
 
       // Remove any demo/mock data from IndexedDB before loading
       await cleanupDemoData();
+
+      // 1. Load from IndexedDB cache immediately — normalise barcodes to string
       try {
         const cached = await dbGetAll("products");
         if (cached.length > 0) {
-          setProducts(cached);
+          setProducts(normaliseProducts(cached));
           setSource("cache");
           setLoading(false);
         }
       } catch (e) { /* continue */ }
 
-      // 2. Background refresh from API — MERGE, never blindly overwrite
+      // 2. Background refresh from API — normalise + merge
       if (api.isConfigured()) {
         try {
           const result = await api.get("getProducts");
           if (result && result.success && result.products) {
-            const merged = await mergeWithLocal(result.products);
+            const normed = normaliseProducts(result.products);
+            const merged = await mergeWithLocal(normed);
             setProducts(merged);
             setSource("api");
-            // Write merged list back to IndexedDB
+            // Write normalised merged list back to IndexedDB
             await dbClear("products");
             await dbPut("products", merged);
             await dbPut("meta", { key: "lastProductSync", value: new Date().toISOString() });
@@ -294,8 +307,7 @@ function useProducts() {
         } catch (e) { /* network error — keep showing cache */ }
       }
 
-      // 3. Fallback to demo data ONLY if API is NOT configured (offline/unconfigured)
-      // When API is configured but returns empty, show empty — not fake demo data
+      // 3. Fallback to demo data ONLY if API is NOT configured
       if (!api.isConfigured()) {
         try {
           const cached = await dbGetAll("products");
@@ -318,7 +330,8 @@ function useProducts() {
     try {
       const result = await api.get("getProducts");
       if (result && result.success && result.products) {
-        const merged = await mergeWithLocal(result.products);
+        const normed = normaliseProducts(result.products);
+        const merged = await mergeWithLocal(normed);
         setProducts(merged);
         setSource("api");
         await dbClear("products");
@@ -1814,16 +1827,16 @@ function InventoryScreen({ products, setProducts, refreshProducts, autoOpenAdd, 
     .sort((a, b) => a.name.localeCompare(b.name));
 
   const handleAdd = async (saved) => {
+    const norm = normaliseProduct(saved);
     // 1. Update React state immediately (UI responds instantly)
-    if (setProducts) setProducts(prev => [...prev, saved]);
+    if (setProducts) setProducts(prev => [...prev, norm]);
     setShowAddForm(false);
     // 2. Save to IndexedDB so it survives page reload / tab switch
-    try { await dbPut("products", saved); } catch(e) { console.warn("dbPut failed:", e); }
-    // 3. Push to Google Sheets if API configured, then refresh so cache reflects confirmed server state
+    try { await dbPut("products", norm); } catch(e) { console.warn("dbPut failed:", e); }
+    // 3. Push to Google Sheets if API configured, then refresh
     if (api.isConfigured()) {
       try {
-        await api.post("addProduct", { ...saved, deviceId: DEVICE_ID });
-        // Small delay so Sheets has time to commit, then pull fresh list
+        await api.post("addProduct", { ...norm, deviceId: DEVICE_ID });
         await new Promise(r => setTimeout(r, 1500));
         await refreshProducts();
       } catch(e) { console.warn("addProduct API failed — saved locally only:", e); }
