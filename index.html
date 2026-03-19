@@ -263,9 +263,25 @@ function useProducts() {
     try {
       const cached = await dbGetAll("products");
       const normCached = normaliseProducts(cached);
+
+      // Build a map of local products by ID for quick lookup
+      const localById = {};
+      normCached.forEach(p => { localById[p.id] = p; });
+
       const apiIds = new Set(apiProducts.map(p => p.id));
+
+      // For each API product, restore any locally-stored photo that Sheets doesn't carry
+      const merged = apiProducts.map(p => {
+        const local = localById[p.id];
+        if (local && local.photo && !p.photo) {
+          return { ...p, photo: local.photo };
+        }
+        return p;
+      });
+
+      // Also append any locally-added products not yet in Sheets
       const localOnly = normCached.filter(p => !apiIds.has(p.id) && !DEMO_IDS.has(p.id));
-      return [...apiProducts, ...localOnly];
+      return [...merged, ...localOnly];
     } catch (e) {
       return apiProducts;
     }
@@ -1427,25 +1443,56 @@ function ProductFormModal({ initial, onSave, onDelete, onClose, title }) {
   };
 
   // Convert selected/captured image file to base64 and store in fp.photo
+  // ── Photo compression ──────────────────────────────────────────
+  // Shrinks ANY photo (even 5MB) down to under 12KB for reliable
+  // storage in Sheets and fast loading. Uses two passes:
+  //   1. Resize to max dimension
+  //   2. Loop down quality until target size is hit
+  const compressPhoto = (dataUrl, targetBytes, maxDim) => {
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement("canvas");
+
+        // Step 1 — resize so longest side = maxDim
+        const ratio = Math.min(maxDim / img.width, maxDim / img.height, 1);
+        canvas.width  = Math.round(img.width  * ratio);
+        canvas.height = Math.round(img.height * ratio);
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+        // Step 2 — reduce JPEG quality until under targetBytes
+        let quality = 0.8;
+        let result  = canvas.toDataURL("image/jpeg", quality);
+
+        while (result.length * 0.75 > targetBytes && quality > 0.05) {
+          quality -= 0.05;
+          result = canvas.toDataURL("image/jpeg", quality);
+        }
+
+        // Step 3 — if still too big, halve the dimensions and retry
+        if (result.length * 0.75 > targetBytes && maxDim > 50) {
+          compressPhoto(dataUrl, targetBytes, Math.round(maxDim * 0.6))
+            .then(resolve);
+          return;
+        }
+
+        resolve(result);
+      };
+      img.src = dataUrl;
+    });
+  };
+
   const handlePhotoSelect = (e) => {
     const file = e.target.files && e.target.files[0];
     if (!file) return;
     const reader = new FileReader();
-    reader.onload = (ev) => {
-      // Compress to max 200px wide to keep storage small
-      const img = new Image();
-      img.onload = () => {
-        const canvas = document.createElement("canvas");
-        const maxSize = 200;
-        const ratio = Math.min(maxSize / img.width, maxSize / img.height);
-        canvas.width = Math.round(img.width * ratio);
-        canvas.height = Math.round(img.height * ratio);
-        const ctx = canvas.getContext("2d");
-        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-        const compressed = canvas.toDataURL("image/jpeg", 0.75);
-        setFp(prev => ({...prev, photo: compressed}));
-      };
-      img.src = ev.target.result;
+    reader.onload = async (ev) => {
+      // Target: under 12KB base64 (~9KB binary), max 160px initial dimension
+      const compressed = await compressPhoto(ev.target.result, 12000, 160);
+      const kb = Math.round(compressed.length * 0.75 / 1024);
+      console.log("[photo] compressed to ~" + kb + "KB");
+      setFp(prev => ({...prev, photo: compressed}));
     };
     reader.readAsDataURL(file);
     e.target.value = "";
@@ -1931,17 +1978,35 @@ function InventoryScreen({ products, setProducts, refreshProducts, autoOpenAdd, 
     })
     .sort((a, b) => a.name.localeCompare(b.name));
 
+  // Helper — uploads base64 photo to Google Drive, returns permanent URL
+  const uploadPhotoToDrive = async (product) => {
+    if (!product.photo || !product.photo.startsWith("data:") || !api.isConfigured()) return product;
+    try {
+      const result = await api.post("uploadPhoto", {
+        base64: product.photo,
+        productId: product.id,
+        deviceId: DEVICE_ID
+      });
+      if (result && result.success && result.photoUrl) {
+        return { ...product, photo: result.photoUrl };
+      }
+    } catch(e) { /* keep base64 as fallback */ }
+    return product;
+  };
+
   const handleAdd = async (saved) => {
     const norm = normaliseProduct(saved);
-    // 1. Update React state immediately (UI responds instantly)
-    if (setProducts) setProducts(prev => [...prev, norm]);
+    // Upload photo to Drive so it's permanent (not cache-dependent)
+    const withUrl = await uploadPhotoToDrive(norm);
+    // 1. Update React state immediately
+    if (setProducts) setProducts(prev => [...prev, withUrl]);
     setShowAddForm(false);
-    // 2. Save to IndexedDB so it survives page reload / tab switch
-    try { await dbPut("products", norm); } catch(e) { console.warn("dbPut failed:", e); }
-    // 3. Push to Google Sheets if API configured, then refresh
+    // 2. Save to IndexedDB (with Drive URL so photo survives cache clears)
+    try { await dbPut("products", withUrl); } catch(e) { console.warn("dbPut failed:", e); }
+    // 3. Push to Google Sheets
     if (api.isConfigured()) {
       try {
-        await api.post("addProduct", { ...norm, deviceId: DEVICE_ID });
+        await api.post("addProduct", { ...withUrl, deviceId: DEVICE_ID });
         await new Promise(r => setTimeout(r, 1500));
         await refreshProducts();
       } catch(e) { console.warn("addProduct API failed — saved locally only:", e); }
@@ -1949,15 +2014,17 @@ function InventoryScreen({ products, setProducts, refreshProducts, autoOpenAdd, 
   };
 
   const handleEdit = async (saved) => {
+    // Upload photo to Drive if it's still a local base64 snapshot
+    const withUrl = await uploadPhotoToDrive(normaliseProduct(saved));
     // 1. Update React state immediately
-    if (setProducts) setProducts(prev => prev.map(p => p.id === saved.id ? saved : p));
+    if (setProducts) setProducts(prev => prev.map(p => p.id === withUrl.id ? withUrl : p));
     setEditingProduct(null);
-    // 2. Update in IndexedDB
-    try { await dbPut("products", saved); } catch(e) { console.warn("dbPut failed:", e); }
+    // 2. Update in IndexedDB with permanent Drive URL
+    try { await dbPut("products", withUrl); } catch(e) { console.warn("dbPut failed:", e); }
     // 3. Push to Google Sheets
     if (api.isConfigured()) {
       try {
-        await api.post("updateProduct", { ...saved, productId: saved.id, deviceId: DEVICE_ID });
+        await api.post("updateProduct", { ...withUrl, productId: withUrl.id, deviceId: DEVICE_ID });
         await new Promise(r => setTimeout(r, 1500));
         await refreshProducts();
       } catch(e) { console.warn("updateProduct API failed:", e); }
