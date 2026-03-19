@@ -1788,11 +1788,16 @@ function LoginScreen({ onLogin }) {
       if (api.isConfigured()) {
         try {
           const result = await api.post("login", { username: user, pin });
-          if (result && result.success) {
+
+          if (result === null || result === undefined) {
+            // API call failed entirely (network error, null response)
+            // → fall through silently to offline fallback below
+          } else if (result.success) {
             setChecking(false);
-            onLogin(result.user); // { id, name, role } from Google Sheets
+            onLogin(result.user);
             return;
           } else {
+            // API responded but said wrong credentials — show error, don't fall through
             setError("Wrong PIN. Try again.");
             setPin("");
             setShake(true);
@@ -1803,9 +1808,11 @@ function LoginScreen({ onLogin }) {
         } catch (e) { /* fall through to offline login */ }
       }
 
-      // Offline fallback — accept PIN locally
+      // Offline fallback — works when API is unreachable or not configured
+      // Also accepts single-digit "0" stored in Sheets by padding with trimEnd
       const offlineUsers = { Admin: "1234", Manager: "5678", Cashier: "0000" };
-      if (offlineUsers[user] === pin || !api.isConfigured()) {
+      const pinMatch = offlineUsers[user] === pin;
+      if (pinMatch || !api.isConfigured()) {
         setChecking(false);
         onLogin({ id: user.toLowerCase(), name: user, role: user });
       } else {
