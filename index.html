@@ -1338,9 +1338,32 @@ function POSScreen({ products, cart, setCart, onComplete }) {
 }
 
 function ProductFormModal({ initial, onSave, onDelete, onClose, title }) {
+  const today = new Date().toISOString().split("T")[0];
   const emptyForm = {name:"",brand:"",type:"barcode",category:"General",price:"",cost:"",stock:"",barcode:"",unit:"pc",image:"📦",pricePerKg:"",pricePerPiece:"",unitDesc:"",lastPurchaseDate:""};
   const [fp, setFp] = useState(initial ? {...emptyForm, ...initial, cost: initial.cost || "", lastPurchaseDate: initial.lastPurchaseDate || "", unitDesc: initial.unitDesc || ""} : emptyForm);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [dateAutoSet, setDateAutoSet] = useState(false);
+
+  // Original stock so we can detect when user is adding new stock
+  const originalStock = initial ? (Number(initial.stock) || 0) : 0;
+
+  // Auto-detect stock increase → set lastPurchaseDate to today automatically
+  const handleStockChange = (val) => {
+    const newStock = Number(val) || 0;
+    const updated = {...fp, stock: val};
+    // If editing and new stock > original → this is a restocking, auto-date to today
+    if (initial && newStock > originalStock && !fp.lastPurchaseDate) {
+      updated.lastPurchaseDate = today;
+      setDateAutoSet(true);
+    } else if (initial && newStock > originalStock) {
+      updated.lastPurchaseDate = today;
+      setDateAutoSet(true);
+    } else if (newStock <= originalStock) {
+      // Stock reduced or unchanged — keep existing date, clear auto flag
+      setDateAutoSet(false);
+    }
+    setFp(updated);
+  };
 
   const salePrice = fp.type === "weight" ? Number(fp.pricePerKg) : fp.type === "piece" ? Number(fp.pricePerPiece) : Number(fp.price);
   const margin = salePrice > 0 && Number(fp.cost) > 0 ? Math.round(((salePrice - Number(fp.cost)) / salePrice) * 100) : null;
@@ -1523,8 +1546,22 @@ function ProductFormModal({ initial, onSave, onDelete, onClose, title }) {
           {/* Stock + Unit Description */}
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className={lbl}>Stock Quantity</label>
-              <input type="number" value={fp.stock} onChange={e => setFp({...fp, stock: e.target.value})} placeholder="0" className={inp} />
+              <label className={lbl}>
+                Stock Quantity
+                {initial && <span className="ml-1 text-zinc-600 font-normal">(was {originalStock})</span>}
+              </label>
+              <input
+                type="number"
+                value={fp.stock}
+                onChange={e => handleStockChange(e.target.value)}
+                placeholder="0"
+                className={inp}
+              />
+              {initial && Number(fp.stock) > originalStock && (
+                <p className="text-xs text-emerald-400 mt-1">
+                  +{Number(fp.stock) - originalStock} units added
+                </p>
+              )}
             </div>
             <div>
               <label className={lbl}>Unit Description</label>
@@ -1534,8 +1571,21 @@ function ProductFormModal({ initial, onSave, onDelete, onClose, title }) {
 
           {/* Last Purchase Date */}
           <div>
-            <label className={lbl}>Last Purchase Date</label>
-            <input type="date" value={fp.lastPurchaseDate} onChange={e => setFp({...fp, lastPurchaseDate: e.target.value})} className={inp} />
+            <div className="flex items-center justify-between mb-1">
+              <label className={lbl} style={{margin:0}}>Last Purchase Date</label>
+              {dateAutoSet && (
+                <span className="text-xs text-emerald-400 flex items-center gap-1">
+                  <svg width="11" height="11" fill="currentColor" viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
+                  Auto-detected today
+                </span>
+              )}
+            </div>
+            <input
+              type="date"
+              value={fp.lastPurchaseDate}
+              onChange={e => { setFp({...fp, lastPurchaseDate: e.target.value}); setDateAutoSet(false); }}
+              className={inp}
+            />
           </div>
 
           {/* Actions */}
