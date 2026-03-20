@@ -47,17 +47,23 @@ const DEVICE_ID = "device_" + Math.random().toString(36).substr(2, 8);
 // ─── IndexedDB Offline Cache ──────────────────────────────────
 
 const DB_NAME = "OolaRetailFlowDB";
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 function openDB() {
   return new Promise((resolve, reject) => {
     const req = indexedDB.open(DB_NAME, DB_VERSION);
     req.onupgradeneeded = (e) => {
       const db = e.target.result;
-      if (!db.objectStoreNames.contains("products")) db.createObjectStore("products", { keyPath: "id" });
+      // v1 stores
+      if (!db.objectStoreNames.contains("products"))     db.createObjectStore("products",     { keyPath: "id" });
       if (!db.objectStoreNames.contains("pendingSales")) db.createObjectStore("pendingSales", { keyPath: "offlineId" });
-      if (!db.objectStoreNames.contains("syncedSales")) db.createObjectStore("syncedSales", { keyPath: "id" });
-      if (!db.objectStoreNames.contains("meta")) db.createObjectStore("meta", { keyPath: "key" });
+      if (!db.objectStoreNames.contains("syncedSales"))  db.createObjectStore("syncedSales",  { keyPath: "id" });
+      if (!db.objectStoreNames.contains("meta"))         db.createObjectStore("meta",         { keyPath: "key" });
+      // v2 stores — new modules
+      if (!db.objectStoreNames.contains("purchases"))    db.createObjectStore("purchases",    { keyPath: "purchaseId" });
+      if (!db.objectStoreNames.contains("expenses"))     db.createObjectStore("expenses",     { keyPath: "expenseId" });
+      if (!db.objectStoreNames.contains("adjustments"))  db.createObjectStore("adjustments",  { keyPath: "adjustId" });
+      if (!db.objectStoreNames.contains("customers"))    db.createObjectStore("customers",    { keyPath: "customerId" });
     };
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
@@ -2190,7 +2196,668 @@ function InventoryScreen({ products, setProducts, refreshProducts, autoOpenAdd, 
   );
 }
 
-function HistoryScreen({ sales }) {
+// ═══════════════════════════════════════════════════════════════
+// PURCHASES SCREEN — Record stock received from suppliers
+// ═══════════════════════════════════════════════════════════════
+function PurchasesScreen({ products, setProducts }) {
+  const [purchases, setPurchases] = useState([]);
+  const [showForm, setShowForm] = useState(false);
+  const [form, setForm] = useState({ productId:"", supplier:"", qty:"", costPerUnit:"", invoiceNo:"", date: new Date().toISOString().split("T")[0], note:"" });
+  const [saving, setSaving] = useState(false);
+  const [filter, setFilter] = useState("all");
+
+  useEffect(() => { dbGetAll("purchases").then(setPurchases).catch(() => {}); }, []);
+
+  const selectedProduct = products.find(p => p.id === form.productId);
+  const totalCost = (Number(form.qty) || 0) * (Number(form.costPerUnit) || 0);
+
+  const handleSave = async () => {
+    if (!form.productId || !form.qty || !form.costPerUnit) return;
+    setSaving(true);
+    const purchase = {
+      purchaseId: "PUR" + Date.now(),
+      productId: form.productId,
+      productName: selectedProduct ? selectedProduct.name : "",
+      supplier: form.supplier || "Unknown",
+      qty: Number(form.qty),
+      costPerUnit: Number(form.costPerUnit),
+      totalCost,
+      invoiceNo: form.invoiceNo || "",
+      date: form.date,
+      note: form.note || "",
+      createdAt: new Date().toISOString(),
+    };
+    // Save purchase record
+    await dbPut("purchases", purchase);
+    setPurchases(prev => [purchase, ...prev]);
+    // Update product stock + last purchase date + cost
+    if (setProducts) {
+      setProducts(prev => prev.map(p => {
+        if (p.id !== form.productId) return p;
+        const newStock = (p.stock || 0) + Number(form.qty);
+        const updated = { ...p, stock: newStock, cost: Number(form.costPerUnit), lastPurchaseDate: form.date };
+        dbPut("products", updated);
+        return updated;
+      }));
+    }
+    setForm({ productId:"", supplier:"", qty:"", costPerUnit:"", invoiceNo:"", date: new Date().toISOString().split("T")[0], note:"" });
+    setShowForm(false);
+    setSaving(false);
+  };
+
+  const todayPurchases = purchases.filter(p => p.date === new Date().toISOString().split("T")[0]);
+  const todayTotal = todayPurchases.reduce((s, p) => s + p.totalCost, 0);
+  const inp = "w-full bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-2.5 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-amber-500 transition-colors";
+  const lbl = "text-xs font-medium text-zinc-400 mb-1 block";
+
+  return (
+    <div className="flex flex-col h-full bg-zinc-950">
+      <div className="px-4 pt-4 pb-3 border-b border-zinc-800">
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-lg font-bold text-zinc-100" style={{fontFamily:"'DM Sans',sans-serif"}}>Purchases</h2>
+          <button onClick={() => setShowForm(true)} className="flex items-center gap-1.5 px-4 py-2 bg-emerald-600 text-white rounded-xl text-sm font-bold active:scale-95 transition-all">
+            <svg width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            Record Purchase
+          </button>
+        </div>
+        <div className="grid grid-cols-2 gap-2">
+          <div className="bg-zinc-800/60 rounded-xl p-3 border border-zinc-700/30">
+            <p className="text-xs text-zinc-500">Today's Spend</p>
+            <p className="text-base font-bold text-amber-400">{formatUGX(todayTotal)}</p>
+          </div>
+          <div className="bg-zinc-800/60 rounded-xl p-3 border border-zinc-700/30">
+            <p className="text-xs text-zinc-500">Today's Records</p>
+            <p className="text-base font-bold text-zinc-200">{todayPurchases.length}</p>
+          </div>
+        </div>
+      </div>
+
+      <div className="flex-1 overflow-y-auto px-4 py-3 space-y-2">
+        {purchases.length === 0
+          ? <div className="text-center py-16"><span className="text-5xl block mb-3">📦</span><p className="text-zinc-400">No purchases yet</p><p className="text-zinc-600 text-sm mt-1">Tap "Record Purchase" when stock arrives</p></div>
+          : [...purchases].sort((a,b) => b.createdAt.localeCompare(a.createdAt)).map(p => (
+            <div key={p.purchaseId} className="bg-zinc-800/50 border border-zinc-700/30 rounded-2xl p-4">
+              <div className="flex items-start justify-between mb-1">
+                <div>
+                  <p className="text-sm font-bold text-zinc-100">{p.productName}</p>
+                  <p className="text-xs text-zinc-500 mt-0.5">Supplier: <span className="text-zinc-300">{p.supplier}</span></p>
+                  {p.invoiceNo && <p className="text-xs text-zinc-500">Invoice: <span className="text-zinc-400">{p.invoiceNo}</span></p>}
+                </div>
+                <div className="text-right">
+                  <p className="text-sm font-bold text-amber-400">{formatUGX(p.totalCost)}</p>
+                  <p className="text-xs text-zinc-500">{p.date}</p>
+                </div>
+              </div>
+              <div className="flex gap-3 mt-2 pt-2 border-t border-zinc-700/30">
+                <span className="text-xs text-zinc-500">Qty: <span className="text-zinc-300 font-semibold">{p.qty}</span></span>
+                <span className="text-xs text-zinc-500">@ <span className="text-zinc-300">{formatUGX(p.costPerUnit)}/unit</span></span>
+                {p.note && <span className="text-xs text-zinc-600 italic">{p.note}</span>}
+              </div>
+            </div>
+          ))
+        }
+      </div>
+
+      {showForm && (
+        <div className="fixed inset-0 z-50 flex items-end bg-black/70" onClick={e => { if(e.target===e.currentTarget) setShowForm(false); }}>
+          <div className="w-full bg-zinc-900 rounded-t-3xl max-h-[90vh] overflow-y-auto border-t border-zinc-700">
+            <div className="flex justify-center pt-3 pb-1"><div className="w-10 h-1 bg-zinc-600 rounded-full"/></div>
+            <div className="flex items-center justify-between px-5 py-3 border-b border-zinc-800">
+              <h3 className="text-base font-bold text-zinc-100" style={{fontFamily:"'DM Sans',sans-serif"}}>Record Purchase</h3>
+              <button onClick={() => setShowForm(false)} className="w-8 h-8 rounded-full bg-zinc-800 text-zinc-400 flex items-center justify-center text-sm">✕</button>
+            </div>
+            <div className="px-5 py-4 space-y-4">
+              <div>
+                <label className={lbl}>Product *</label>
+                <select value={form.productId} onChange={e => { const p=products.find(x=>x.id===e.target.value); setForm(f=>({...f, productId:e.target.value, costPerUnit: p?p.cost:""})); }} className={inp}>
+                  <option value="">— Select product —</option>
+                  {[...products].sort((a,b)=>a.name.localeCompare(b.name)).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                </select>
+                {selectedProduct && <p className="text-xs text-zinc-500 mt-1">Current stock: <span className="text-amber-400">{selectedProduct.stock} {selectedProduct.unit}</span></p>}
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div><label className={lbl}>Quantity Received *</label><input type="number" value={form.qty} onChange={e=>setForm(f=>({...f,qty:e.target.value}))} placeholder="0" className={inp}/></div>
+                <div><label className={lbl}>Cost Per Unit (UGX) *</label><input type="number" value={form.costPerUnit} onChange={e=>setForm(f=>({...f,costPerUnit:e.target.value}))} placeholder="0" className={inp}/></div>
+              </div>
+              {totalCost > 0 && <div className="bg-amber-500/10 border border-amber-500/20 rounded-xl px-4 py-2.5 flex justify-between"><span className="text-sm text-zinc-400">Total Cost</span><span className="text-sm font-bold text-amber-400">{formatUGX(totalCost)}</span></div>}
+              <div className="grid grid-cols-2 gap-3">
+                <div><label className={lbl}>Supplier</label><input type="text" value={form.supplier} onChange={e=>setForm(f=>({...f,supplier:e.target.value}))} placeholder="Supplier name" className={inp}/></div>
+                <div><label className={lbl}>Invoice No.</label><input type="text" value={form.invoiceNo} onChange={e=>setForm(f=>({...f,invoiceNo:e.target.value}))} placeholder="Optional" className={inp}/></div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div><label className={lbl}>Date</label><input type="date" value={form.date} onChange={e=>setForm(f=>({...f,date:e.target.value}))} className={inp}/></div>
+                <div><label className={lbl}>Note</label><input type="text" value={form.note} onChange={e=>setForm(f=>({...f,note:e.target.value}))} placeholder="Optional" className={inp}/></div>
+              </div>
+              <div className="flex gap-3 pb-4">
+                <button onClick={()=>setShowForm(false)} className="flex-1 py-3.5 rounded-xl bg-zinc-800 border border-zinc-700 text-zinc-300 font-medium text-sm">Cancel</button>
+                <button onClick={handleSave} disabled={!form.productId||!form.qty||!form.costPerUnit||saving} className="flex-1 py-3.5 rounded-xl bg-emerald-600 text-white font-bold text-sm disabled:opacity-40 active:scale-95">
+                  {saving ? "Saving..." : "Save Purchase"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
+// EXPENSES SCREEN — Track daily business expenses
+// ═══════════════════════════════════════════════════════════════
+function ExpensesScreen() {
+  const CATEGORIES = ["Rent","Electricity","Water","Transport","Salaries","Packaging","Repairs","Airtime","Other"];
+  const [expenses, setExpenses] = useState([]);
+  const [showForm, setShowForm] = useState(false);
+  const [form, setForm] = useState({ category:"Other", description:"", amount:"", date: new Date().toISOString().split("T")[0], paidTo:"" });
+
+  useEffect(() => { dbGetAll("expenses").then(setExpenses).catch(()=>{}); }, []);
+
+  const todayStr = new Date().toISOString().split("T")[0];
+  const todayExpenses = expenses.filter(e => e.date === todayStr);
+  const todayTotal = todayExpenses.reduce((s,e) => s + e.amount, 0);
+  const monthTotal = expenses.filter(e => e.date && e.date.startsWith(todayStr.slice(0,7))).reduce((s,e)=>s+e.amount,0);
+
+  const handleSave = async () => {
+    if (!form.amount) return;
+    const exp = {
+      expenseId: "EXP" + Date.now(),
+      category: form.category,
+      description: form.description || form.category,
+      amount: Number(form.amount),
+      date: form.date,
+      paidTo: form.paidTo || "",
+      createdAt: new Date().toISOString(),
+    };
+    await dbPut("expenses", exp);
+    setExpenses(prev => [exp, ...prev]);
+    setForm({ category:"Other", description:"", amount:"", date: todayStr, paidTo:"" });
+    setShowForm(false);
+  };
+
+  const catColors = { Rent:"text-red-400 bg-red-500/15", Electricity:"text-yellow-400 bg-yellow-500/15", Water:"text-blue-400 bg-blue-500/15", Transport:"text-purple-400 bg-purple-500/15", Salaries:"text-emerald-400 bg-emerald-500/15", Packaging:"text-cyan-400 bg-cyan-500/15", Repairs:"text-orange-400 bg-orange-500/15", Airtime:"text-pink-400 bg-pink-500/15", Other:"text-zinc-400 bg-zinc-700" };
+  const inp = "w-full bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-2.5 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-amber-500 transition-colors";
+  const lbl = "text-xs font-medium text-zinc-400 mb-1 block";
+
+  return (
+    <div className="flex flex-col h-full bg-zinc-950">
+      <div className="px-4 pt-4 pb-3 border-b border-zinc-800">
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-lg font-bold text-zinc-100" style={{fontFamily:"'DM Sans',sans-serif"}}>Expenses</h2>
+          <button onClick={() => setShowForm(true)} className="flex items-center gap-1.5 px-4 py-2 bg-red-600 text-white rounded-xl text-sm font-bold active:scale-95 transition-all">
+            <svg width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            Add Expense
+          </button>
+        </div>
+        <div className="grid grid-cols-2 gap-2">
+          <div className="bg-red-500/10 border border-red-500/20 rounded-xl p-3">
+            <p className="text-xs text-zinc-500">Today's Expenses</p>
+            <p className="text-base font-bold text-red-400">{formatUGX(todayTotal)}</p>
+          </div>
+          <div className="bg-zinc-800/60 border border-zinc-700/30 rounded-xl p-3">
+            <p className="text-xs text-zinc-500">This Month</p>
+            <p className="text-base font-bold text-zinc-200">{formatUGX(monthTotal)}</p>
+          </div>
+        </div>
+      </div>
+
+      <div className="flex-1 overflow-y-auto px-4 py-3 space-y-2">
+        {expenses.length === 0
+          ? <div className="text-center py-16"><span className="text-5xl block mb-3">💸</span><p className="text-zinc-400">No expenses recorded</p></div>
+          : [...expenses].sort((a,b)=>b.createdAt.localeCompare(a.createdAt)).map(exp => (
+            <div key={exp.expenseId} className="bg-zinc-800/50 border border-zinc-700/30 rounded-2xl p-4 flex items-center gap-3">
+              <span className={`text-xs font-bold px-2 py-1 rounded-lg flex-shrink-0 ${catColors[exp.category]||catColors.Other}`}>{exp.category}</span>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold text-zinc-200 truncate">{exp.description}</p>
+                {exp.paidTo && <p className="text-xs text-zinc-500">Paid to: {exp.paidTo}</p>}
+                <p className="text-xs text-zinc-600">{exp.date}</p>
+              </div>
+              <p className="text-sm font-bold text-red-400 flex-shrink-0">{formatUGX(exp.amount)}</p>
+            </div>
+          ))
+        }
+      </div>
+
+      {showForm && (
+        <div className="fixed inset-0 z-50 flex items-end bg-black/70" onClick={e=>{if(e.target===e.currentTarget)setShowForm(false);}}>
+          <div className="w-full bg-zinc-900 rounded-t-3xl max-h-[85vh] overflow-y-auto border-t border-zinc-700">
+            <div className="flex justify-center pt-3 pb-1"><div className="w-10 h-1 bg-zinc-600 rounded-full"/></div>
+            <div className="flex items-center justify-between px-5 py-3 border-b border-zinc-800">
+              <h3 className="text-base font-bold text-zinc-100">Add Expense</h3>
+              <button onClick={()=>setShowForm(false)} className="w-8 h-8 rounded-full bg-zinc-800 text-zinc-400 flex items-center justify-center">✕</button>
+            </div>
+            <div className="px-5 py-4 space-y-4">
+              <div>
+                <label className={lbl}>Category</label>
+                <div className="flex flex-wrap gap-1.5">
+                  {CATEGORIES.map(c => <button key={c} onClick={()=>setForm(f=>({...f,category:c}))} className={`px-3 py-1.5 rounded-full text-xs font-semibold transition-all ${form.category===c?"bg-amber-500 text-zinc-900":"bg-zinc-800 text-zinc-400 border border-zinc-700"}`}>{c}</button>)}
+                </div>
+              </div>
+              <div><label className={lbl}>Amount (UGX) *</label><input type="number" value={form.amount} onChange={e=>setForm(f=>({...f,amount:e.target.value}))} placeholder="0" className={inp}/></div>
+              <div><label className={lbl}>Description</label><input type="text" value={form.description} onChange={e=>setForm(f=>({...f,description:e.target.value}))} placeholder="What was it for?" className={inp}/></div>
+              <div className="grid grid-cols-2 gap-3">
+                <div><label className={lbl}>Paid To</label><input type="text" value={form.paidTo} onChange={e=>setForm(f=>({...f,paidTo:e.target.value}))} placeholder="Person/Company" className={inp}/></div>
+                <div><label className={lbl}>Date</label><input type="date" value={form.date} onChange={e=>setForm(f=>({...f,date:e.target.value}))} className={inp}/></div>
+              </div>
+              <div className="flex gap-3 pb-4">
+                <button onClick={()=>setShowForm(false)} className="flex-1 py-3.5 rounded-xl bg-zinc-800 border border-zinc-700 text-zinc-300 font-medium text-sm">Cancel</button>
+                <button onClick={handleSave} disabled={!form.amount} className="flex-1 py-3.5 rounded-xl bg-red-600 text-white font-bold text-sm disabled:opacity-40 active:scale-95">Save Expense</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
+// STOCK ADJUSTMENTS — Handle losses, damage, corrections
+// ═══════════════════════════════════════════════════════════════
+function StockAdjustmentsScreen({ products, setProducts }) {
+  const REASONS = ["Damaged","Expired","Lost/Missing","Correction","Returned to Supplier","Promotional Use","Other"];
+  const [adjustments, setAdjustments] = useState([]);
+  const [showForm, setShowForm] = useState(false);
+  const [form, setForm] = useState({ productId:"", type:"reduce", qty:"", reason:"Damaged", note:"", date: new Date().toISOString().split("T")[0] });
+
+  useEffect(() => { dbGetAll("adjustments").then(setAdjustments).catch(()=>{}); }, []);
+
+  const selectedProduct = products.find(p => p.id === form.productId);
+  const inp = "w-full bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-2.5 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-amber-500 transition-colors";
+  const lbl = "text-xs font-medium text-zinc-400 mb-1 block";
+
+  const handleSave = async () => {
+    if (!form.productId || !form.qty) return;
+    const qty = Number(form.qty);
+    const adj = {
+      adjustId: "ADJ" + Date.now(),
+      productId: form.productId,
+      productName: selectedProduct ? selectedProduct.name : "",
+      type: form.type,
+      qty,
+      reason: form.reason,
+      note: form.note,
+      date: form.date,
+      createdAt: new Date().toISOString(),
+    };
+    await dbPut("adjustments", adj);
+    setAdjustments(prev => [adj, ...prev]);
+    // Update stock
+    if (setProducts && selectedProduct) {
+      setProducts(prev => prev.map(p => {
+        if (p.id !== form.productId) return p;
+        const newStock = form.type === "reduce"
+          ? Math.max(0, (p.stock||0) - qty)
+          : (p.stock||0) + qty;
+        const updated = { ...p, stock: newStock };
+        dbPut("products", updated);
+        return updated;
+      }));
+    }
+    setForm({ productId:"", type:"reduce", qty:"", reason:"Damaged", note:"", date: new Date().toISOString().split("T")[0] });
+    setShowForm(false);
+  };
+
+  return (
+    <div className="flex flex-col h-full bg-zinc-950">
+      <div className="px-4 pt-4 pb-3 border-b border-zinc-800 flex items-center justify-between">
+        <h2 className="text-lg font-bold text-zinc-100" style={{fontFamily:"'DM Sans',sans-serif"}}>Stock Adjustments</h2>
+        <button onClick={()=>setShowForm(true)} className="flex items-center gap-1.5 px-4 py-2 bg-orange-600 text-white rounded-xl text-sm font-bold active:scale-95 transition-all">
+          <svg width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          New Adjustment
+        </button>
+      </div>
+      <div className="flex-1 overflow-y-auto px-4 py-3 space-y-2">
+        {adjustments.length === 0
+          ? <div className="text-center py-16"><span className="text-5xl block mb-3">📋</span><p className="text-zinc-400">No adjustments recorded</p><p className="text-zinc-600 text-sm mt-1">Record damaged or lost stock here</p></div>
+          : [...adjustments].sort((a,b)=>b.createdAt.localeCompare(a.createdAt)).map(adj => (
+            <div key={adj.adjustId} className="bg-zinc-800/50 border border-zinc-700/30 rounded-2xl p-4">
+              <div className="flex items-start justify-between">
+                <div>
+                  <p className="text-sm font-bold text-zinc-100">{adj.productName}</p>
+                  <p className="text-xs text-zinc-500 mt-0.5">{adj.reason}{adj.note ? ` — ${adj.note}` : ""}</p>
+                  <p className="text-xs text-zinc-600">{adj.date}</p>
+                </div>
+                <span className={`text-sm font-black ${adj.type==="reduce"?"text-red-400":"text-emerald-400"}`}>
+                  {adj.type==="reduce"?"-":"+"}  {adj.qty}
+                </span>
+              </div>
+            </div>
+          ))
+        }
+      </div>
+
+      {showForm && (
+        <div className="fixed inset-0 z-50 flex items-end bg-black/70" onClick={e=>{if(e.target===e.currentTarget)setShowForm(false);}}>
+          <div className="w-full bg-zinc-900 rounded-t-3xl max-h-[90vh] overflow-y-auto border-t border-zinc-700">
+            <div className="flex justify-center pt-3 pb-1"><div className="w-10 h-1 bg-zinc-600 rounded-full"/></div>
+            <div className="flex items-center justify-between px-5 py-3 border-b border-zinc-800">
+              <h3 className="text-base font-bold text-zinc-100">Stock Adjustment</h3>
+              <button onClick={()=>setShowForm(false)} className="w-8 h-8 rounded-full bg-zinc-800 text-zinc-400 flex items-center justify-center">✕</button>
+            </div>
+            <div className="px-5 py-4 space-y-4">
+              {/* Type toggle */}
+              <div className="grid grid-cols-2 gap-2">
+                <button onClick={()=>setForm(f=>({...f,type:"reduce"}))} className={`py-2.5 rounded-xl font-bold text-sm transition-all ${form.type==="reduce"?"bg-red-600 text-white":"bg-zinc-800 border border-zinc-700 text-zinc-400"}`}>− Reduce Stock</button>
+                <button onClick={()=>setForm(f=>({...f,type:"add"}))} className={`py-2.5 rounded-xl font-bold text-sm transition-all ${form.type==="add"?"bg-emerald-600 text-white":"bg-zinc-800 border border-zinc-700 text-zinc-400"}`}>+ Add Stock</button>
+              </div>
+              <div>
+                <label className={lbl}>Product *</label>
+                <select value={form.productId} onChange={e=>setForm(f=>({...f,productId:e.target.value}))} className={inp}>
+                  <option value="">— Select product —</option>
+                  {[...products].sort((a,b)=>a.name.localeCompare(b.name)).map(p=><option key={p.id} value={p.id}>{p.name} (stock: {p.stock})</option>)}
+                </select>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div><label className={lbl}>Quantity *</label><input type="number" value={form.qty} onChange={e=>setForm(f=>({...f,qty:e.target.value}))} placeholder="0" className={inp}/></div>
+                <div><label className={lbl}>Date</label><input type="date" value={form.date} onChange={e=>setForm(f=>({...f,date:e.target.value}))} className={inp}/></div>
+              </div>
+              <div>
+                <label className={lbl}>Reason</label>
+                <div className="flex flex-wrap gap-1.5">
+                  {REASONS.map(r=><button key={r} onClick={()=>setForm(f=>({...f,reason:r}))} className={`px-2.5 py-1 rounded-lg text-xs font-semibold ${form.reason===r?"bg-orange-500 text-white":"bg-zinc-800 text-zinc-400 border border-zinc-700"}`}>{r}</button>)}
+                </div>
+              </div>
+              <div><label className={lbl}>Note (optional)</label><input type="text" value={form.note} onChange={e=>setForm(f=>({...f,note:e.target.value}))} placeholder="Additional details" className={inp}/></div>
+              <div className="flex gap-3 pb-4">
+                <button onClick={()=>setShowForm(false)} className="flex-1 py-3.5 rounded-xl bg-zinc-800 border border-zinc-700 text-zinc-300 font-medium text-sm">Cancel</button>
+                <button onClick={handleSave} disabled={!form.productId||!form.qty} className="flex-1 py-3.5 rounded-xl bg-orange-600 text-white font-bold text-sm disabled:opacity-40 active:scale-95">Save Adjustment</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
+// CUSTOMERS SCREEN — Credit & customer tracking
+// ═══════════════════════════════════════════════════════════════
+function CustomersScreen() {
+  const [customers, setCustomers] = useState([]);
+  const [showForm, setShowForm] = useState(false);
+  const [showCredit, setShowCredit] = useState(null);
+  const [form, setForm] = useState({ name:"", phone:"", note:"" });
+  const [creditForm, setCreditForm] = useState({ amount:"", description:"", type:"credit", date: new Date().toISOString().split("T")[0] });
+
+  useEffect(() => { dbGetAll("customers").then(setCustomers).catch(()=>{}); }, []);
+
+  const inp = "w-full bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-2.5 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-amber-500 transition-colors";
+  const lbl = "text-xs font-medium text-zinc-400 mb-1 block";
+  const totalCreditOwed = customers.reduce((s,c) => s + (c.balance||0), 0);
+
+  const handleAddCustomer = async () => {
+    if (!form.name.trim()) return;
+    const cust = { customerId:"CUST"+Date.now(), name:form.name, phone:form.phone, note:form.note, balance:0, transactions:[], createdAt:new Date().toISOString() };
+    await dbPut("customers", cust);
+    setCustomers(prev=>[...prev, cust]);
+    setForm({ name:"", phone:"", note:"" });
+    setShowForm(false);
+  };
+
+  const handleAddCredit = async () => {
+    if (!showCredit || !creditForm.amount) return;
+    const amount = creditForm.type==="credit" ? Number(creditForm.amount) : -Number(creditForm.amount);
+    const updated = {
+      ...showCredit,
+      balance: (showCredit.balance||0) + amount,
+      transactions: [...(showCredit.transactions||[]), { amount, description:creditForm.description||creditForm.type, date:creditForm.date, type:creditForm.type, at:new Date().toISOString() }]
+    };
+    await dbPut("customers", updated);
+    setCustomers(prev=>prev.map(c=>c.customerId===updated.customerId?updated:c));
+    setShowCredit(updated);
+    setCreditForm({ amount:"", description:"", type:"credit", date:new Date().toISOString().split("T")[0] });
+  };
+
+  return (
+    <div className="flex flex-col h-full bg-zinc-950">
+      <div className="px-4 pt-4 pb-3 border-b border-zinc-800">
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-lg font-bold text-zinc-100" style={{fontFamily:"'DM Sans',sans-serif"}}>Customers</h2>
+          <button onClick={()=>setShowForm(true)} className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 text-white rounded-xl text-sm font-bold active:scale-95 transition-all">
+            <svg width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            Add Customer
+          </button>
+        </div>
+        {totalCreditOwed > 0 && (
+          <div className="bg-orange-500/10 border border-orange-500/20 rounded-xl px-4 py-2.5 flex justify-between">
+            <span className="text-xs text-zinc-400">Total Credit Owed</span>
+            <span className="text-sm font-bold text-orange-400">{formatUGX(totalCreditOwed)}</span>
+          </div>
+        )}
+      </div>
+      <div className="flex-1 overflow-y-auto px-4 py-3 space-y-2">
+        {customers.length === 0
+          ? <div className="text-center py-16"><span className="text-5xl block mb-3">👤</span><p className="text-zinc-400">No customers yet</p><p className="text-zinc-600 text-sm mt-1">Add customers to track credit</p></div>
+          : customers.map(c => (
+            <button key={c.customerId} onClick={()=>setShowCredit(c)} className="w-full bg-zinc-800/50 border border-zinc-700/30 rounded-2xl p-4 flex items-center gap-3 text-left active:scale-98 transition-all">
+              <div className="w-10 h-10 rounded-full bg-blue-600/20 border border-blue-600/30 flex items-center justify-center flex-shrink-0">
+                <span className="text-base font-bold text-blue-400">{c.name[0].toUpperCase()}</span>
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-bold text-zinc-100">{c.name}</p>
+                {c.phone && <p className="text-xs text-zinc-500">{c.phone}</p>}
+                <p className="text-xs text-zinc-600">{(c.transactions||[]).length} transaction{(c.transactions||[]).length!==1?"s":""}</p>
+              </div>
+              <div className="text-right flex-shrink-0">
+                <p className={`text-sm font-bold ${(c.balance||0)>0?"text-orange-400":(c.balance||0)<0?"text-emerald-400":"text-zinc-500"}`}>
+                  {(c.balance||0)===0?"Clear":(c.balance||0)>0?`Owes ${formatUGX(c.balance)}`:`Credit ${formatUGX(Math.abs(c.balance))}`}
+                </p>
+              </div>
+            </button>
+          ))
+        }
+      </div>
+
+      {/* Add customer form */}
+      {showForm && (
+        <div className="fixed inset-0 z-50 flex items-end bg-black/70" onClick={e=>{if(e.target===e.currentTarget)setShowForm(false);}}>
+          <div className="w-full bg-zinc-900 rounded-t-3xl border-t border-zinc-700">
+            <div className="flex justify-center pt-3 pb-1"><div className="w-10 h-1 bg-zinc-600 rounded-full"/></div>
+            <div className="flex items-center justify-between px-5 py-3 border-b border-zinc-800">
+              <h3 className="text-base font-bold text-zinc-100">Add Customer</h3>
+              <button onClick={()=>setShowForm(false)} className="w-8 h-8 rounded-full bg-zinc-800 text-zinc-400 flex items-center justify-center">✕</button>
+            </div>
+            <div className="px-5 py-4 space-y-3">
+              <div><label className={lbl}>Name *</label><input type="text" value={form.name} onChange={e=>setForm(f=>({...f,name:e.target.value}))} placeholder="Customer name" className={inp}/></div>
+              <div><label className={lbl}>Phone</label><input type="tel" value={form.phone} onChange={e=>setForm(f=>({...f,phone:e.target.value}))} placeholder="e.g. 0701 234 567" className={inp}/></div>
+              <div><label className={lbl}>Note</label><input type="text" value={form.note} onChange={e=>setForm(f=>({...f,note:e.target.value}))} placeholder="Optional" className={inp}/></div>
+              <div className="flex gap-3 pb-4">
+                <button onClick={()=>setShowForm(false)} className="flex-1 py-3.5 rounded-xl bg-zinc-800 border border-zinc-700 text-zinc-300 font-medium text-sm">Cancel</button>
+                <button onClick={handleAddCustomer} disabled={!form.name.trim()} className="flex-1 py-3.5 rounded-xl bg-blue-600 text-white font-bold text-sm disabled:opacity-40 active:scale-95">Add Customer</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Customer credit detail */}
+      {showCredit && (
+        <div className="fixed inset-0 z-50 flex items-end bg-black/70">
+          <div className="w-full bg-zinc-900 rounded-t-3xl max-h-[90vh] overflow-y-auto border-t border-zinc-700">
+            <div className="flex justify-center pt-3 pb-1"><div className="w-10 h-1 bg-zinc-600 rounded-full"/></div>
+            <div className="flex items-center justify-between px-5 py-3 border-b border-zinc-800">
+              <div>
+                <h3 className="text-base font-bold text-zinc-100">{showCredit.name}</h3>
+                {showCredit.phone && <p className="text-xs text-zinc-500">{showCredit.phone}</p>}
+              </div>
+              <button onClick={()=>setShowCredit(null)} className="w-8 h-8 rounded-full bg-zinc-800 text-zinc-400 flex items-center justify-center">✕</button>
+            </div>
+            <div className="px-5 py-4 space-y-4">
+              {/* Balance */}
+              <div className={`rounded-xl p-4 text-center ${(showCredit.balance||0)>0?"bg-orange-500/10 border border-orange-500/20":(showCredit.balance||0)<0?"bg-emerald-500/10 border border-emerald-500/20":"bg-zinc-800 border border-zinc-700"}`}>
+                <p className="text-xs text-zinc-500 uppercase tracking-wider">Balance</p>
+                <p className={`text-2xl font-black mt-1 ${(showCredit.balance||0)>0?"text-orange-400":(showCredit.balance||0)<0?"text-emerald-400":"text-zinc-400"}`}>
+                  {(showCredit.balance||0)===0?"All Clear":(showCredit.balance||0)>0?`Owes ${formatUGX(showCredit.balance)}`:`Overpaid ${formatUGX(Math.abs(showCredit.balance))}`}
+                </p>
+              </div>
+              {/* Add transaction */}
+              <div className="bg-zinc-800/50 border border-zinc-700/30 rounded-xl p-4 space-y-3">
+                <p className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Record Transaction</p>
+                <div className="grid grid-cols-2 gap-2">
+                  <button onClick={()=>setCreditForm(f=>({...f,type:"credit"}))} className={`py-2 rounded-xl text-sm font-bold ${creditForm.type==="credit"?"bg-orange-500 text-white":"bg-zinc-700 text-zinc-400"}`}>+ Credit (owes)</button>
+                  <button onClick={()=>setCreditForm(f=>({...f,type:"payment"}))} className={`py-2 rounded-xl text-sm font-bold ${creditForm.type==="payment"?"bg-emerald-600 text-white":"bg-zinc-700 text-zinc-400"}`}>− Payment (paid)</button>
+                </div>
+                <input type="number" value={creditForm.amount} onChange={e=>setCreditForm(f=>({...f,amount:e.target.value}))} placeholder="Amount (UGX)" className="w-full bg-zinc-900 border border-zinc-700 rounded-xl px-3 py-2.5 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-amber-500"/>
+                <input type="text" value={creditForm.description} onChange={e=>setCreditForm(f=>({...f,description:e.target.value}))} placeholder="Description (optional)" className="w-full bg-zinc-900 border border-zinc-700 rounded-xl px-3 py-2.5 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-amber-500"/>
+                <button onClick={handleAddCredit} disabled={!creditForm.amount} className="w-full py-3 rounded-xl bg-blue-600 text-white font-bold text-sm disabled:opacity-40 active:scale-95">Save</button>
+              </div>
+              {/* Transaction history */}
+              {(showCredit.transactions||[]).length > 0 && (
+                <div className="space-y-2">
+                  <p className="text-xs font-semibold text-zinc-500 uppercase">History</p>
+                  {[...(showCredit.transactions||[])].reverse().map((t,i) => (
+                    <div key={i} className="flex justify-between items-center py-2 border-b border-zinc-800">
+                      <div><p className="text-xs text-zinc-300">{t.description}</p><p className="text-xs text-zinc-600">{t.date}</p></div>
+                      <span className={`text-sm font-bold ${t.amount>0?"text-orange-400":"text-emerald-400"}`}>{t.amount>0?"+":""}{formatUGX(t.amount)}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
+// REPORTS SCREEN — Business intelligence & summaries
+// ═══════════════════════════════════════════════════════════════
+function ReportsScreen({ sales, products }) {
+  const [period, setPeriod] = useState("today");
+  const [expenses, setExpenses] = useState([]);
+  const [purchases, setPurchases] = useState([]);
+
+  useEffect(() => {
+    dbGetAll("expenses").then(setExpenses).catch(()=>{});
+    dbGetAll("purchases").then(setPurchases).catch(()=>{});
+  }, []);
+
+  const today = new Date();
+  const todayStr = today.toISOString().split("T")[0];
+  const weekStart = new Date(today); weekStart.setDate(today.getDate() - today.getDay());
+  const monthStr = todayStr.slice(0,7);
+
+  const filterByPeriod = (arr, dateField) => {
+    if (period === "today")   return arr.filter(x => (x[dateField]||"").startsWith(todayStr));
+    if (period === "week")    return arr.filter(x => new Date(x[dateField]||"") >= weekStart);
+    if (period === "month")   return arr.filter(x => (x[dateField]||"").startsWith(monthStr));
+    return arr;
+  };
+
+  const periodSales     = filterByPeriod(sales, "dateTime");
+  const periodExpenses  = filterByPeriod(expenses, "date");
+  const periodPurchases = filterByPeriod(purchases, "date");
+
+  const revenue  = periodSales.reduce((s,x) => s+x.total, 0);
+  const cogs     = periodSales.reduce((s,sale) => s + sale.items.reduce((a,i) => a + ((i.cost||0)*i.qty), 0), 0);
+  const grossProfit = revenue - cogs;
+  const totalExpenses = periodExpenses.reduce((s,x) => s+x.amount, 0);
+  const netProfit = grossProfit - totalExpenses;
+  const totalPurchases = periodPurchases.reduce((s,x) => s+x.totalCost, 0);
+  const cashSales = periodSales.filter(s=>s.method==="cash").reduce((s,x)=>s+x.total,0);
+  const momoSales = periodSales.filter(s=>s.method==="momo").reduce((s,x)=>s+x.total,0);
+
+  // Top selling products
+  const productSales = {};
+  periodSales.forEach(sale => sale.items.forEach(item => {
+    if (!productSales[item.name]) productSales[item.name] = { name:item.name, image:item.image, revenue:0, qty:0 };
+    productSales[item.name].revenue += item.lineTotal;
+    productSales[item.name].qty += item.qty||1;
+  }));
+  const topProducts = Object.values(productSales).sort((a,b)=>b.revenue-a.revenue).slice(0,5);
+
+  // Low stock
+  const lowStock = products.filter(p => {
+    const s = p.type==="variant" ? (p.variants||[]).reduce((a,v)=>a+v.stock,0) : (p.stock||0);
+    return s <= 10 && s > 0;
+  });
+  const outOfStock = products.filter(p => {
+    const s = p.type==="variant" ? (p.variants||[]).reduce((a,v)=>a+v.stock,0) : (p.stock||0);
+    return s === 0;
+  });
+
+  const row = (label, value, color="text-zinc-200") => (
+    <div className="flex justify-between items-center py-2.5 border-b border-zinc-800/60">
+      <span className="text-sm text-zinc-400">{label}</span>
+      <span className={`text-sm font-bold ${color}`}>{value}</span>
+    </div>
+  );
+
+  return (
+    <div className="flex flex-col h-full bg-zinc-950">
+      <div className="px-4 pt-4 pb-3 border-b border-zinc-800">
+        <h2 className="text-lg font-bold text-zinc-100 mb-3" style={{fontFamily:"'DM Sans',sans-serif"}}>Reports</h2>
+        <div className="flex gap-1.5">
+          {["today","week","month"].map(p => (
+            <button key={p} onClick={()=>setPeriod(p)} className={`flex-1 py-2 rounded-xl text-xs font-bold transition-all ${period===p?"bg-amber-500 text-zinc-900":"bg-zinc-800 text-zinc-400 border border-zinc-700"}`}>
+              {p==="today"?"Today":p==="week"?"This Week":"This Month"}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="flex-1 overflow-y-auto px-4 py-3 space-y-4 pb-6">
+        {/* P&L Summary */}
+        <div className="bg-zinc-800/50 border border-zinc-700/30 rounded-2xl p-4">
+          <p className="text-xs font-bold text-zinc-400 uppercase tracking-wider mb-2">Profit & Loss</p>
+          {row("Revenue", formatUGX(revenue), "text-amber-400")}
+          {row("Cost of Goods Sold", formatUGX(cogs), "text-zinc-400")}
+          {row("Gross Profit", formatUGX(grossProfit), grossProfit>=0?"text-emerald-400":"text-red-400")}
+          {row("Expenses", formatUGX(totalExpenses), "text-red-400")}
+          <div className="flex justify-between items-center pt-2.5 mt-1">
+            <span className="text-sm font-bold text-zinc-300">Net Profit</span>
+            <span className={`text-lg font-black ${netProfit>=0?"text-emerald-400":"text-red-400"}`}>{formatUGX(netProfit)}</span>
+          </div>
+        </div>
+
+        {/* Sales breakdown */}
+        <div className="bg-zinc-800/50 border border-zinc-700/30 rounded-2xl p-4">
+          <p className="text-xs font-bold text-zinc-400 uppercase tracking-wider mb-2">Sales</p>
+          {row("Transactions", periodSales.length.toString())}
+          {row("Average Sale", periodSales.length>0?formatUGX(Math.round(revenue/periodSales.length)):"—")}
+          {row("💵 Cash", formatUGX(cashSales), "text-emerald-400")}
+          {row("📱 MoMo", formatUGX(momoSales), "text-blue-400")}
+          {row("📦 Purchases Paid", formatUGX(totalPurchases), "text-orange-400")}
+        </div>
+
+        {/* Top products */}
+        {topProducts.length > 0 && (
+          <div className="bg-zinc-800/50 border border-zinc-700/30 rounded-2xl p-4">
+            <p className="text-xs font-bold text-zinc-400 uppercase tracking-wider mb-3">Top Selling Products</p>
+            {topProducts.map((p,i) => (
+              <div key={p.name} className="flex items-center gap-3 py-2 border-b border-zinc-800/40 last:border-0">
+                <span className="text-zinc-500 text-xs w-4">{i+1}</span>
+                <span className="text-base">{p.image}</span>
+                <span className="flex-1 text-sm text-zinc-300 truncate">{p.name}</span>
+                <span className="text-sm font-bold text-amber-400">{formatUGX(p.revenue)}</span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Stock health */}
+        <div className="bg-zinc-800/50 border border-zinc-700/30 rounded-2xl p-4">
+          <p className="text-xs font-bold text-zinc-400 uppercase tracking-wider mb-2">Stock Health</p>
+          {row("Total Products", products.length.toString())}
+          {row("Low Stock (≤10)", lowStock.length.toString(), lowStock.length>0?"text-amber-400":"text-emerald-400")}
+          {row("Out of Stock", outOfStock.length.toString(), outOfStock.length>0?"text-red-400":"text-emerald-400")}
+          {outOfStock.length > 0 && (
+            <div className="mt-2 pt-2 border-t border-zinc-800">
+              <p className="text-xs text-zinc-500 mb-1">Out of stock:</p>
+              {outOfStock.map(p => <p key={p.id} className="text-xs text-red-400">• {p.name}</p>)}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
   const todayTotal = sales.reduce((s, sale) => s + sale.total, 0);
   const todayProfit = sales.reduce((s, sale) => s + sale.items.reduce((p, i) => p + ((i.unitPrice - (i.cost || 0)) * i.qty), 0), 0);
 
@@ -2529,36 +3196,16 @@ function DashboardScreen({ sales, products, user, onNavigate }) {
 // ═══════════════════════════════════════════════════════════════
 function SideDrawer({ open, onClose, user, activeTab, onNavigate, onLogout, online, pendingCount, syncing, source, onSync }) {
   const menuItems = [
-    {
-      id: "dashboard", label: "Dashboard",
-      icon: <svg width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
-    },
-    {
-      id: "pos", label: "New Sale",
-      icon: <svg width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24"><path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 01-8 0"/></svg>
-    },
-    {
-      id: "inventory", label: "Inventory",
-      icon: <svg width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24"><path d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/></svg>
-    },
-    {
-      id: "history", label: "Sales & Bills",
-      icon: <svg width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
-    },
-    {
-      id: "customers", label: "Customers",
-      icon: <svg width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/></svg>,
-      badge: "Soon",
-    },
-    {
-      id: "reports", label: "Reports",
-      icon: <svg width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>,
-      badge: "Soon",
-    },
-    {
-      id: "settings-drawer", label: "Settings",
-      icon: <svg width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24"><path d="M12 15a3 3 0 100-6 3 3 0 000 6z"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
-    },
+    { id:"dashboard",    label:"Dashboard",         icon:<svg width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg> },
+    { id:"pos",          label:"New Sale",           icon:<svg width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24"><path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 01-8 0"/></svg> },
+    { id:"inventory",    label:"Inventory",          icon:<svg width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24"><path d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/></svg> },
+    { id:"purchases",    label:"Purchases",          icon:<svg width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24"><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg> },
+    { id:"adjustments",  label:"Stock Adjustments",  icon:<svg width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/><circle cx="12" cy="12" r="9"/></svg> },
+    { id:"history",      label:"Sales & Bills",      icon:<svg width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg> },
+    { id:"expenses",     label:"Expenses",           icon:<svg width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg> },
+    { id:"customers",    label:"Customers",          icon:<svg width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/></svg> },
+    { id:"reports",      label:"Reports",            icon:<svg width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg> },
+    { id:"settings-drawer", label:"Settings",       icon:<svg width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24"><path d="M12 15a3 3 0 100-6 3 3 0 000 6z"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg> },
   ];
 
   const roleColor = user && user.role === "Admin" ? "from-amber-500 to-orange-500" :
@@ -2566,13 +3213,8 @@ function SideDrawer({ open, onClose, user, activeTab, onNavigate, onLogout, onli
                     "from-emerald-500 to-teal-500";
 
   const handleNav = (id) => {
-    if (id === "settings-drawer") {
-      onNavigate("settings");
-    } else if (id === "customers" || id === "reports") {
-      // coming soon - do nothing
-    } else {
-      onNavigate(id);
-    }
+    if (id === "settings-drawer") { onNavigate("settings"); }
+    else { onNavigate(id); }
     onClose();
   };
 
@@ -3050,16 +3692,9 @@ function RetailFlowPOS() {
 
   // Dashboard navigation handler
   const handleNavigate = (tab) => {
-    if (tab === "inventory-add") {
-      setActiveTab("inventory");
-      setAutoOpenAdd(true);
-    } else if (tab === "purchases") {
-      setActiveTab("inventory");
-    } else if (tab === "settings") {
-      setShowSettings(true);
-    } else {
-      setActiveTab(tab);
-    }
+    if (tab === "inventory-add") { setActiveTab("inventory"); setAutoOpenAdd(true); }
+    else if (tab === "settings") { setShowSettings(true); }
+    else { setActiveTab(tab); }
   };
 
   if (!loggedIn) return <LoginScreen onLogin={(u) => { setUser(u); setLoggedIn(true); }} />;
@@ -3157,10 +3792,15 @@ function RetailFlowPOS() {
 
       {/* Content */}
       <main className="flex-1 overflow-hidden">
-        {activeTab === "dashboard" && <DashboardScreen sales={sales} products={products} user={user} onNavigate={handleNavigate} />}
-        {activeTab === "pos" && <POSScreen products={products} cart={cart} setCart={setCart} onComplete={() => setShowPayment(true)} />}
-        {activeTab === "inventory" && <InventoryScreen products={products} setProducts={setProducts} refreshProducts={refreshProducts} user={user} autoOpenAdd={autoOpenAdd} onAddOpened={() => setAutoOpenAdd(false)} />}
-        {activeTab === "history" && <HistoryScreen sales={sales} />}
+        {activeTab === "dashboard"   && <DashboardScreen sales={sales} products={products} user={user} onNavigate={handleNavigate} />}
+        {activeTab === "pos"         && <POSScreen products={products} cart={cart} setCart={setCart} onComplete={() => setShowPayment(true)} />}
+        {activeTab === "inventory"   && <InventoryScreen products={products} setProducts={setProducts} refreshProducts={refreshProducts} user={user} autoOpenAdd={autoOpenAdd} onAddOpened={() => setAutoOpenAdd(false)} />}
+        {activeTab === "purchases"   && <PurchasesScreen products={products} setProducts={setProducts} />}
+        {activeTab === "adjustments" && <StockAdjustmentsScreen products={products} setProducts={setProducts} />}
+        {activeTab === "history"     && <HistoryScreen sales={sales} />}
+        {activeTab === "expenses"    && <ExpensesScreen />}
+        {activeTab === "customers"   && <CustomersScreen />}
+        {activeTab === "reports"     && <ReportsScreen sales={sales} products={products} />}
       </main>
 
       <nav className="flex border-t border-zinc-800/50 bg-zinc-950/95 backdrop-blur-sm px-2 pb-1 pt-1">
