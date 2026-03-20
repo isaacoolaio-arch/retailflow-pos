@@ -2857,7 +2857,7 @@ function ReportsScreen({ sales, products }) {
   );
 }
 
-
+function HistoryScreen({ sales }) {
   const todayTotal = sales.reduce((s, sale) => s + sale.total, 0);
   const todayProfit = sales.reduce((s, sale) => s + sale.items.reduce((p, i) => p + ((i.unitPrice - (i.cost || 0)) * i.qty), 0), 0);
 
