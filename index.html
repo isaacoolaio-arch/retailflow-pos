@@ -3195,13 +3195,8 @@ function DashboardScreen({ sales, products, user, onNavigate }) {
 // Side Drawer Navigation
 // ═══════════════════════════════════════════════════════════════
 function SideDrawer({ open, onClose, user, activeTab, onNavigate, onLogout, online, pendingCount, syncing, source, onSync }) {
-  const [expanded, setExpanded] = useState({ items: true, inventory: true, reports: false });
-
+  const [expanded, setExpanded] = useState({ items: false, inventory: false, reports: false });
   const toggleGroup = (key) => setExpanded(prev => ({...prev, [key]: !prev[key]}));
-
-  const roleColor = user && user.role === "Admin" ? "from-amber-500 to-orange-500" :
-                    user && user.role === "Manager" ? "from-blue-500 to-indigo-500" :
-                    "from-emerald-500 to-teal-500";
 
   const handleNav = (id) => {
     if (id === "settings-drawer") onNavigate("settings");
@@ -3209,145 +3204,132 @@ function SideDrawer({ open, onClose, user, activeTab, onNavigate, onLogout, onli
     onClose();
   };
 
-  // Chevron icon
-  const Chevron = ({ up }) => (
-    <svg width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
-      {up ? <polyline points="18 15 12 9 6 15"/> : <polyline points="6 9 12 15 18 9"/>}
-    </svg>
-  );
+  const isActive = (id) => activeTab === id || (id === "settings-drawer" && activeTab === "settings");
 
   // Single nav item
-  const NavItem = ({ id, label, icon, indent }) => {
-    const isActive = activeTab === id || (id === "settings-drawer" && activeTab === "settings");
-    return (
-      <button onClick={() => handleNav(id)}
-        className={`w-full flex items-center gap-3 py-2.5 rounded-xl text-left transition-all active:scale-98 ${indent ? "pl-10 pr-3" : "px-3"} ${
-          isActive ? "bg-amber-500/15 text-amber-400 border border-amber-500/25" : "text-zinc-300 hover:bg-zinc-800/80 hover:text-zinc-100"
-        }`}>
-        <span className={`flex-shrink-0 ${isActive ? "text-amber-400" : "text-zinc-500"}`}>{icon}</span>
-        <span className={`text-sm ${isActive ? "font-bold" : "font-medium"}`}>{label}</span>
-      </button>
-    );
-  };
-
-  // Group header (collapsible)
-  const GroupHeader = ({ groupKey, label, icon }) => (
-    <button onClick={() => toggleGroup(groupKey)}
-      className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-zinc-400 hover:bg-zinc-800/50 transition-all mt-1">
-      <span className="text-zinc-500 flex-shrink-0">{icon}</span>
-      <span className="flex-1 text-sm font-semibold text-zinc-300">{label}</span>
-      <span className="text-zinc-600"><Chevron up={expanded[groupKey]} /></span>
+  const NavItem = ({ id, label, icon, indent }) => (
+    <button onClick={() => handleNav(id)} style={{
+      width:"100%", display:"flex", alignItems:"center", gap:"14px",
+      padding: indent ? "11px 16px 11px 44px" : "11px 16px",
+      background: isActive(id) ? "#f0fdf4" : "transparent",
+      border:"none", borderRadius:"10px", cursor:"pointer",
+      transition:"background 0.15s",
+    }}>
+      <span style={{color: isActive(id) ? "#16a34a" : "#374151", flexShrink:0}}>{icon}</span>
+      <span style={{fontSize:"14px", fontWeight: isActive(id) ? "700" : "500", color: isActive(id) ? "#16a34a" : "#111827", flex:1, textAlign:"left"}}>{label}</span>
     </button>
   );
 
-  const icons = {
-    dashboard: <svg width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>,
-    sale:      <svg width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24"><path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 01-8 0"/></svg>,
-    products:  <svg width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24"><path d="M20.59 13.41l-7.17 7.17a2 2 0 01-2.83 0L2 12V2h10l8.59 8.59a2 2 0 010 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>,
+  // Collapsible group header
+  const GroupHeader = ({ groupKey, label, icon }) => (
+    <button onClick={() => toggleGroup(groupKey)} style={{
+      width:"100%", display:"flex", alignItems:"center", gap:"14px",
+      padding:"11px 16px", background:"transparent", border:"none",
+      borderRadius:"10px", cursor:"pointer", transition:"background 0.15s",
+    }}>
+      <span style={{color:"#374151", flexShrink:0}}>{icon}</span>
+      <span style={{fontSize:"14px", fontWeight:"500", color:"#111827", flex:1, textAlign:"left"}}>{label}</span>
+      <svg width="14" height="14" fill="none" stroke="#9ca3af" strokeWidth="2.5" viewBox="0 0 24 24">
+        {expanded[groupKey] ? <polyline points="18 15 12 9 6 15"/> : <polyline points="6 9 12 15 18 9"/>}
+      </svg>
+    </button>
+  );
+
+  const IC = {
+    dashboard: <svg width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>,
+    bill:      <svg width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>,
+    customers: <svg width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/></svg>,
+    settings:  <svg width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09a1.65 1.65 0 00-1-1.51 1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>,
+    items:     <svg width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>,
     history:   <svg width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>,
-    customers: <svg width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/></svg>,
-    settings:  <svg width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24"><path d="M12 15a3 3 0 100-6 3 3 0 000 6z"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>,
-    inventory: <svg width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24"><path d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/></svg>,
+    expenses:  <svg width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg>,
+    inventory: <svg width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24"><path d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/></svg>,
+    invlist:   <svg width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24"><path d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/></svg>,
     purchases: <svg width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24"><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>,
     adjust:    <svg width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/><circle cx="12" cy="12" r="9"/></svg>,
-    reports:   <svg width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>,
-    expenses:  <svg width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg>,
-    items:     <svg width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>,
+    reports:   <svg width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>,
   };
 
   return (
     <>
-      {/* Backdrop */}
-      <div onClick={onClose} className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm transition-opacity duration-300"
-        style={{ opacity: open ? 1 : 0, pointerEvents: open ? "auto" : "none" }} />
+      <div onClick={onClose} className="fixed inset-0 z-40 bg-black/50 transition-opacity duration-300"
+        style={{opacity: open?1:0, pointerEvents: open?"auto":"none"}} />
 
-      {/* Drawer panel */}
-      <div className="fixed top-0 left-0 h-full z-50 w-72 bg-zinc-900 flex flex-col shadow-2xl"
-        style={{ transform: open ? "translateX(0)" : "translateX(-100%)", transition: "transform 0.28s cubic-bezier(0.4,0,0.2,1)", borderRight: "1px solid rgba(63,63,70,0.5)" }}>
+      <div className="fixed top-0 left-0 h-full z-50 flex flex-col shadow-2xl"
+        style={{width:"280px", background:"#fff", transform: open?"translateX(0)":"translateX(-100%)", transition:"transform 0.28s cubic-bezier(0.4,0,0.2,1)", borderRight:"1px solid #f3f4f6"}}>
 
         {/* User profile */}
-        <div className="px-4 pt-12 pb-4 border-b border-zinc-800">
-          <div className="flex items-center gap-3">
-            <div className={`w-11 h-11 rounded-full bg-gradient-to-br ${roleColor} flex items-center justify-center shadow-lg flex-shrink-0`}>
-              <svg width="20" height="20" fill="white" viewBox="0 0 24 24"><path d="M12 12c2.7 0 4.8-2.1 4.8-4.8S14.7 2.4 12 2.4 7.2 4.5 7.2 7.2 9.3 12 12 12zm0 2.4c-3.2 0-9.6 1.6-9.6 4.8v2.4h19.2v-2.4c0-3.2-6.4-4.8-9.6-4.8z"/></svg>
+        <div style={{padding:"48px 16px 16px", borderBottom:"1px solid #f3f4f6"}}>
+          <div style={{display:"flex", alignItems:"center", gap:"12px"}}>
+            <div style={{width:"44px", height:"44px", borderRadius:"50%", background: user && user.role==="Admin" ? "#16a34a" : user && user.role==="Manager" ? "#2563eb" : "#0891b2", display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0}}>
+              <svg width="22" height="22" fill="white" viewBox="0 0 24 24"><path d="M12 12c2.7 0 4.8-2.1 4.8-4.8S14.7 2.4 12 2.4 7.2 4.5 7.2 7.2 9.3 12 12 12zm0 2.4c-3.2 0-9.6 1.6-9.6 4.8v2.4h19.2v-2.4c0-3.2-6.4-4.8-9.6-4.8z"/></svg>
             </div>
-            <div className="min-w-0">
-              <p className="text-sm font-bold text-zinc-100 truncate" style={{fontFamily:"'DM Sans',sans-serif"}}>{user && user.name ? user.name : "User"}</p>
-              <p className="text-xs text-zinc-500">{user && user.role ? user.role : "Cashier"}</p>
+            <div>
+              <p style={{fontSize:"15px", fontWeight:"700", color:"#111827", margin:0}}>{user && user.name ? user.name : "User"}</p>
+              <p style={{fontSize:"12px", color:"#6b7280", margin:0}}>{user && user.role ? user.role : "Cashier"}</p>
             </div>
           </div>
-          <div className="mt-2.5 flex items-center gap-2 px-2.5 py-1.5 bg-zinc-800/60 rounded-lg">
-            <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${online ? "bg-emerald-400" : "bg-red-400"} ${syncing ? "animate-pulse" : ""}`} />
-            <span className="text-xs text-zinc-500 flex-1">{online ? "Online" : "Offline"}</span>
-            <span className={`text-xs px-1.5 py-0.5 rounded font-semibold ${source === "api" ? "bg-emerald-500/15 text-emerald-400" : source === "cache" ? "bg-blue-500/15 text-blue-400" : "bg-zinc-700 text-zinc-500"}`}>
-              {source === "api" ? "Live" : source === "cache" ? "Cached" : "Demo"}
-            </span>
+          {/* Online indicator */}
+          <div style={{marginTop:"10px", display:"flex", alignItems:"center", gap:"6px"}}>
+            <span style={{width:"7px", height:"7px", borderRadius:"50%", background: online ? "#22c55e" : "#ef4444", flexShrink:0}} />
+            <span style={{fontSize:"11px", color:"#9ca3af"}}>{online ? "Online" : "Offline"} • {source === "api" ? "Live" : source === "cache" ? "Cached" : "Demo"}</span>
+            {pendingCount > 0 && <span style={{marginLeft:"auto", fontSize:"11px", fontWeight:"700", color:"#d97706", background:"#fef3c7", padding:"1px 6px", borderRadius:"999px"}}>{pendingCount} pending</span>}
           </div>
         </div>
 
-        {/* Navigation */}
-        <div className="flex-1 overflow-y-auto py-2 px-2 space-y-0.5">
+        {/* Nav */}
+        <div style={{flex:1, overflowY:"auto", padding:"8px"}}>
 
-          {/* Dashboard — standalone */}
-          <NavItem id="dashboard" label="Dashboard" icon={icons.dashboard} />
+          <NavItem id="dashboard"      label="Dashboard"  icon={IC.dashboard} />
+          <NavItem id="pos"            label="Bill"       icon={IC.bill} />
+          <NavItem id="customers"      label="Customers"  icon={IC.customers} />
+          <NavItem id="settings-drawer" label="Settings"  icon={IC.settings} />
 
-          {/* Bill — standalone */}
-          <NavItem id="pos" label="Bill" icon={icons.sale} />
+          <div style={{height:"1px", background:"#f3f4f6", margin:"6px 8px"}} />
 
-          {/* Customers — standalone */}
-          <NavItem id="customers" label="Customers" icon={icons.customers} />
+          <GroupHeader groupKey="items" label="Items" icon={IC.items} />
+          {expanded.items && <>
+            <NavItem id="history"  label="Sales & Bills" icon={IC.history}  indent />
+            <NavItem id="expenses" label="Expenses"      icon={IC.expenses} indent />
+          </>}
 
-          {/* Settings — standalone */}
-          <NavItem id="settings-drawer" label="Settings" icon={icons.settings} />
+          <div style={{height:"1px", background:"#f3f4f6", margin:"6px 8px"}} />
 
-          <div className="my-1 border-t border-zinc-800/60" />
+          <GroupHeader groupKey="inventory" label="Inventory" icon={IC.inventory} />
+          {expanded.inventory && <>
+            <NavItem id="inventory"   label="Inventory List"       icon={IC.invlist}   indent />
+            <NavItem id="purchases"   label="Purchases / Stock In"  icon={IC.purchases} indent />
+            <NavItem id="adjustments" label="Inventory Logs"        icon={IC.adjust}    indent />
+          </>}
 
-          {/* Items group */}
-          <GroupHeader groupKey="items" label="Items" icon={icons.items} />
-          {expanded.items && (
-            <div className="space-y-0.5">
-              <NavItem id="history"   label="Sales & Bills"  icon={icons.history}   indent />
-              <NavItem id="expenses"  label="Expenses"       icon={icons.expenses}  indent />
-            </div>
-          )}
+          <div style={{height:"1px", background:"#f3f4f6", margin:"6px 8px"}} />
 
-          <div className="my-1 border-t border-zinc-800/60" />
+          <GroupHeader groupKey="reports" label="Reports" icon={IC.reports} />
+          {expanded.reports && <>
+            <NavItem id="reports" label="Sales Report" icon={IC.reports} indent />
+          </>}
 
-          {/* Inventory group */}
-          <GroupHeader groupKey="inventory" label="Inventory" icon={icons.inventory} />
-          {expanded.inventory && (
-            <div className="space-y-0.5">
-              <NavItem id="inventory"    label="Inventory List"     icon={icons.products}  indent />
-              <NavItem id="purchases"    label="Purchases / Stock In" icon={icons.purchases} indent />
-              <NavItem id="adjustments"  label="Inventory Logs"     icon={icons.adjust}    indent />
-            </div>
-          )}
-
-          <div className="my-1 border-t border-zinc-800/60" />
-
-          {/* Reports group */}
-          <GroupHeader groupKey="reports" label="Reports" icon={icons.reports} />
-          {expanded.reports && (
-            <div className="space-y-0.5">
-              <NavItem id="reports" label="Sales Report"     icon={icons.reports}   indent />
-            </div>
-          )}
-
-          <div className="my-1 border-t border-zinc-800/60" />
+          <div style={{height:"1px", background:"#f3f4f6", margin:"6px 8px"}} />
 
           {/* Sync */}
-          <button onClick={() => { onSync(); onClose(); }} disabled={!online}
-            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-zinc-500 hover:bg-zinc-800/80 hover:text-zinc-300 transition-all disabled:opacity-30 text-sm font-medium">
-            <svg width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24" className={syncing ? "animate-spin" : ""}><path d="M21 12a9 9 0 11-6.219-8.56"/></svg>
-            Sync Data
-            {pendingCount > 0 && <span className="ml-auto bg-amber-500/20 text-amber-400 text-xs font-bold px-2 py-0.5 rounded-full">{pendingCount}</span>}
+          <button onClick={() => { onSync(); onClose(); }} disabled={!online} style={{
+            width:"100%", display:"flex", alignItems:"center", gap:"14px", padding:"11px 16px",
+            background:"transparent", border:"none", borderRadius:"10px", cursor: online ? "pointer" : "not-allowed",
+            opacity: online ? 1 : 0.4,
+          }}>
+            <svg width="20" height="20" fill="none" stroke="#6b7280" strokeWidth="1.8" viewBox="0 0 24 24" style={{flexShrink:0}} className={syncing?"animate-spin":""}><path d="M21 12a9 9 0 11-6.219-8.56"/></svg>
+            <span style={{fontSize:"14px", fontWeight:"500", color:"#374151"}}>Sync Data</span>
+            {pendingCount > 0 && <span style={{marginLeft:"auto", fontSize:"11px", fontWeight:"700", color:"#d97706", background:"#fef3c7", padding:"2px 7px", borderRadius:"999px"}}>{pendingCount}</span>}
           </button>
         </div>
 
         {/* Logout */}
-        <div className="p-3 border-t border-zinc-800">
-          <button onClick={() => { onLogout(); onClose(); }}
-            className="w-full py-3 rounded-xl bg-red-600 hover:bg-red-500 text-white font-bold text-sm flex items-center justify-center gap-2 active:scale-95 transition-all shadow-lg shadow-red-600/20">
+        <div style={{padding:"12px", borderTop:"1px solid #f3f4f6"}}>
+          <button onClick={() => { onLogout(); onClose(); }} style={{
+            width:"100%", padding:"13px", background:"#ef4444", border:"none", borderRadius:"12px",
+            color:"#fff", fontWeight:"700", fontSize:"14px", display:"flex", alignItems:"center",
+            justifyContent:"center", gap:"8px", cursor:"pointer",
+          }} className="active:scale-95 transition-all">
             <svg width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
             Logout
           </button>
