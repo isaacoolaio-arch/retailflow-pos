@@ -1,108 +1,96 @@
-var CACHE_NAME = 'oola-retailflow-v10';
+// Oola RetailFlow — Service Worker v11
+const CACHE_NAME = "oola-retailflow-v11";
 
-// ALL assets needed to run the app offline — cached during install
-var CORE_ASSETS = [
-  './index.html',
-  './manifest.json',
-  // React
-  'https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js',
-  'https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js',
-  // Babel (needed to compile JSX in browser)
-  'https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js',
-  // Barcode scanner
-  'https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js',
-  // Tailwind CDN (dynamic but we try — offline fallback uses cached version)
-  'https://cdn.tailwindcss.com'
+// Core app files — must be cached for offline to work
+const CORE_FILES = [
+  "./",
+  "./index.html",
+  "./manifest.json",
 ];
 
-// ── Install: pre-cache all core assets ────────────────────────
-self.addEventListener('install', function(event) {
-  self.skipWaiting();
-  event.waitUntil(
-    caches.open(CACHE_NAME).then(function(cache) {
-      // Cache each asset individually so one failure doesn't block others
-      var promises = CORE_ASSETS.map(function(url) {
-        return cache.add(url).catch(function(err) {
-          console.log('[SW] Failed to cache:', url, err.message);
-        });
-      });
-      return Promise.all(promises);
-    })
-  );
-});
+// CDN scripts used by index.html — cached on install, served offline
+const CDN_SCRIPTS = [
+  "https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js",
+  "https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js",
+  "https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js",
+  "https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js",
+];
+// Note: cdn.tailwindcss.com blocks SW caching (CORS) — it will be cached on first page load instead
 
-// ── Activate: wipe ALL old caches ─────────────────────────────
-self.addEventListener('activate', function(event) {
-  event.waitUntil(
-    caches.keys().then(function(keys) {
-      return Promise.all(
-        keys.map(function(k) {
-          if (k !== CACHE_NAME) {
-            console.log('[SW] Deleting old cache:', k);
-            return caches.delete(k);
-          }
-        })
-      );
-    }).then(function() {
-      return self.clients.claim();
-    })
-  );
-});
+// ── INSTALL: cache everything needed to run offline ─────────────
+self.addEventListener("install", (event) => {
+  console.log("[SW] Installing", CACHE_NAME);
+  event.waitUntil((async () => {
+    const cache = await caches.open(CACHE_NAME);
 
-// ── Fetch handler ─────────────────────────────────────────────
-self.addEventListener('fetch', function(event) {
-  var url = event.request.url;
-  var method = event.request.method;
+    // 1. Cache core app files (must succeed)
+    await cache.addAll(CORE_FILES);
+    console.log("[SW] Core files cached ✓");
 
-  // Pass through: non-GET and API calls always go to network
-  if (method !== 'GET') return;
-  if (url.indexOf('script.google.com') !== -1) return;
-  if (url.indexOf('api.anthropic.com') !== -1) return;
-
-  // index.html: network-first so updates deploy immediately, cache as fallback
-  var isHtmlPage = url.indexOf('index.html') !== -1 ||
-                   url.endsWith('/') ||
-                   url.endsWith('/retailflow-pos') ||
-                   url.endsWith('/retailflow-pos/');
-
-  if (isHtmlPage) {
-    event.respondWith(
-      fetch(event.request).then(function(response) {
-        // Fresh from network — update the cache
-        var clone = response.clone();
-        caches.open(CACHE_NAME).then(function(cache) {
-          cache.put(event.request, clone);
-        });
-        return response;
-      }).catch(function() {
-        // Offline — serve cached version
-        return caches.match('./index.html').then(function(cached) {
-          return cached || new Response(
-            '<h1 style="font-family:sans-serif;padding:20px">Offline</h1><p style="font-family:sans-serif;padding:0 20px">Open the app online at least once to enable offline mode.</p>',
-            { headers: { 'Content-Type': 'text/html' } }
-          );
-        });
-      })
-    );
-    return;
-  }
-
-  // All other assets (CDN scripts, fonts, etc): cache-first
-  // If not cached yet, fetch and cache for next time
-  event.respondWith(
-    caches.match(event.request).then(function(cached) {
-      if (cached) return cached;
-      return fetch(event.request).then(function(response) {
-        if (response.ok) {
-          var clone = response.clone();
-          caches.open(CACHE_NAME).then(function(cache) {
-            cache.put(event.request, clone);
-          });
+    // 2. Cache CDN scripts (failures are non-fatal)
+    for (const url of CDN_SCRIPTS) {
+      try {
+        const res = await fetch(url, { mode: "cors" });
+        if (res && res.ok) {
+          await cache.put(url, res);
+          console.log("[SW] CDN cached:", url.split("/").pop());
         }
-        return response;
-      }).catch(function() {
-        return new Response('', { status: 503, statusText: 'Offline' });
-      });
-    })
+      } catch (e) {
+        console.warn("[SW] CDN cache skipped (non-fatal):", url.split("/").pop());
+      }
+    }
+  })());
+  self.skipWaiting();
+});
+
+// ── ACTIVATE: remove old caches ─────────────────────────────────
+self.addEventListener("activate", (event) => {
+  console.log("[SW] Activating", CACHE_NAME);
+  event.waitUntil(
+    caches.keys().then(keys =>
+      Promise.all(keys.filter(k => k !== CACHE_NAME).map(k => {
+        console.log("[SW] Removed old cache:", k);
+        return caches.delete(k);
+      }))
+    )
   );
+  self.clients.claim();
+});
+
+// ── FETCH: cache-first, network fallback ────────────────────────
+self.addEventListener("fetch", (event) => {
+  const url = new URL(event.request.url);
+
+  // Pass through: API calls always go to network (never cache)
+  if (
+    url.hostname.includes("script.google.com") ||
+    url.hostname.includes("googleapis.com") ||
+    url.hostname.includes("drive.google.com")
+  ) return;
+
+  event.respondWith((async () => {
+    // 1. Try cache first
+    const cached = await caches.match(event.request);
+    if (cached) return cached;
+
+    // 2. Not cached — try network
+    try {
+      const response = await fetch(event.request);
+      if (response && response.status === 200) {
+        // Cache this response for next time
+        const cache = await caches.open(CACHE_NAME);
+        cache.put(event.request, response.clone());
+      }
+      return response;
+    } catch (networkError) {
+      // 3. Network failed + not in cache
+      // For page navigation: return the app shell so it loads offline
+      if (event.request.mode === "navigate") {
+        const shell = await caches.match("./index.html");
+        if (shell) return shell;
+      }
+      // For other resources: return empty 503
+      return new Response("Service unavailable offline", { status: 503 });
+    }
+  })());
 });
