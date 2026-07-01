@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Oola RetailFlow POS</title>
     <meta name="description" content="Oola RetailFlow Point of Sale System">
-    <meta name="theme-color" content="#18181b">
+    <meta name="theme-color" content="#0f172a">
     <meta name="mobile-web-app-capable" content="yes">
     <link rel="manifest" href="manifest.json">
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏪</text></svg>">
@@ -18,10 +18,10 @@
         *{-webkit-tap-highlight-color:transparent}
         body{margin:0;padding:0;overflow:hidden;background:#09090b}
         #ld{position:fixed;inset:0;background:#09090b;display:flex;flex-direction:column;align-items:center;justify-content:center;font-family:system-ui,sans-serif;color:#a1a1aa;z-index:9999}
-        .ll{width:80px;height:80px;border-radius:24px;background:linear-gradient(135deg,#f59e0b,#ea580c);display:flex;align-items:center;justify-content:center;font-size:40px;margin-bottom:16px;box-shadow:0 8px 30px rgba(245,158,11,0.2)}
+        .ll{width:80px;height:80px;border-radius:24px;background:linear-gradient(135deg,#3b82f6,#6366f1);display:flex;align-items:center;justify-content:center;font-size:40px;margin-bottom:16px;box-shadow:0 8px 30px rgba(245,158,11,0.2)}
         .lt{color:#fafafa;font-size:24px;font-weight:700;margin:0 0 4px}
         .ls{font-size:14px;margin:0}
-        .lp{width:32px;height:32px;border:3px solid #27272a;border-top-color:#f59e0b;border-radius:50%;margin-top:24px;animation:sp .8s linear infinite}
+        .lp{width:32px;height:32px;border:3px solid #27272a;border-top-color:#3b82f6;border-radius:50%;margin-top:24px;animation:sp .8s linear infinite}
         @keyframes sp{to{transform:rotate(360deg)}}
     </style>
 </head>
@@ -378,7 +378,7 @@ const MOCK_PRODUCTS = [
 
 const TYPE_LABELS = {
   barcode: { label: "Scan", color: "bg-blue-500/15 text-blue-400 border-blue-500/25", icon: "📦" },
-  weight: { label: "Weigh", color: "bg-amber-500/15 text-amber-400 border-amber-500/25", icon: "⚖️" },
+  weight: { label: "Weigh", color: "bg-blue-500/15 text-blue-400 border-blue-500/25", icon: "⚖️" },
   piece: { label: "Count", color: "bg-emerald-500/15 text-emerald-400 border-emerald-500/25", icon: "🔢" },
   variant: { label: "Size", color: "bg-purple-500/15 text-purple-400 border-purple-500/25", icon: "📐" },
 };
@@ -393,7 +393,7 @@ function SearchInput({ value, onChange, placeholder, autoFocus }) {
         <svg width="17" height="17" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
       </span>
       <input type="text" value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder} autoFocus={autoFocus}
-        className="w-full bg-zinc-800/60 border border-zinc-700/50 rounded-xl pl-9 pr-3 py-2 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-amber-500/50 focus:ring-1 focus:ring-amber-500/20 transition-all text-sm" />
+        className="w-full bg-zinc-800/60 border border-zinc-700/50 rounded-xl pl-9 pr-3 py-2 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-blue-500/50 focus:ring-1 focus:ring-blue-500/20 transition-all text-sm" />
     </div>
   );
 }
@@ -410,7 +410,7 @@ function WeightEntryModal({ product, onAdd, onClose }) {
           <span className="text-3xl">{product.image}</span>
           <div className="flex-1">
             <h3 className="text-lg font-bold text-zinc-100">{product.name}</h3>
-            <p className="text-sm text-amber-400 font-semibold">{formatUGX(product.pricePerKg)} / kg</p>
+            <p className="text-sm text-blue-400 font-semibold">{formatUGX(product.pricePerKg)} / kg</p>
           </div>
           <button onClick={onClose} className="text-zinc-500 hover:text-zinc-300 p-1">
             <svg width="22" height="22" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg>
@@ -422,7 +422,7 @@ function WeightEntryModal({ product, onAdd, onClose }) {
             <div className="relative">
               <input type="number" value={weight} onChange={e => setWeight(e.target.value)} step={product.weightStep || 0.25} min={product.minWeight || 0.25}
                 autoFocus placeholder="0.00"
-                className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-4 text-3xl text-center text-zinc-100 font-bold focus:outline-none focus:border-amber-500 transition-all font-mono" />
+                className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-4 text-3xl text-center text-zinc-100 font-bold focus:outline-none focus:border-blue-500 transition-all font-mono" />
               <span className="absolute right-4 top-1/2 -translate-y-1/2 text-zinc-500 text-lg font-medium">kg</span>
             </div>
           </div>
@@ -432,21 +432,21 @@ function WeightEntryModal({ product, onAdd, onClose }) {
               {quickWeights.map(w => (
                 <button key={w} onClick={() => setWeight(w.toString())}
                   className={`py-3 rounded-xl text-sm font-bold transition-all active:scale-95 ${
-                    weight === w.toString() ? "bg-amber-500/20 text-amber-400 border-2 border-amber-500/40" : "bg-zinc-800 text-zinc-300 border border-zinc-700 hover:bg-zinc-700"
+                    weight === w.toString() ? "bg-blue-500/20 text-blue-400 border-2 border-blue-500/40" : "bg-zinc-800 text-zinc-300 border border-zinc-700 hover:bg-zinc-700"
                   }`}>{w < 1 ? `${w * 1000}g` : `${w}kg`}</button>
               ))}
             </div>
           </div>
           {parseFloat(weight) > 0 && (
-            <div className="bg-amber-500/10 border border-amber-500/20 rounded-xl p-4 text-center">
+            <div className="bg-blue-500/10 border border-blue-500/20 rounded-xl p-4 text-center">
               <p className="text-sm text-zinc-400">{weight}kg × {formatUGX(product.pricePerKg)}</p>
-              <p className="text-3xl font-bold text-amber-400 mt-1" style={{ fontFamily: "'DM Sans', sans-serif" }}>{formatUGX(total)}</p>
+              <p className="text-3xl font-bold text-blue-400 mt-1" style={{ fontFamily: "'DM Sans', sans-serif" }}>{formatUGX(total)}</p>
             </div>
           )}
           <button onClick={() => { if (parseFloat(weight) > 0) onAdd(parseFloat(weight), total); }}
             disabled={!parseFloat(weight)}
             className={`w-full py-4 rounded-xl font-bold text-lg transition-all active:scale-95 ${
-              parseFloat(weight) > 0 ? "bg-gradient-to-r from-amber-500 to-orange-500 text-zinc-900 shadow-lg shadow-amber-500/20" : "bg-zinc-800 text-zinc-600 cursor-not-allowed"
+              parseFloat(weight) > 0 ? "bg-gradient-to-r from-blue-500 to-indigo-500 text-white shadow-lg shadow-blue-500/20" : "bg-zinc-800 text-zinc-600 cursor-not-allowed"
             }`}>Add to Cart — {parseFloat(weight) > 0 ? formatUGX(total) : "Enter weight"}</button>
         </div>
       </div>
@@ -497,7 +497,7 @@ function PieceEntryModal({ product, onAdd, onClose }) {
             <p className="text-3xl font-bold text-emerald-400 mt-1" style={{ fontFamily: "'DM Sans', sans-serif" }}>{formatUGX(total)}</p>
           </div>
           <button onClick={() => onAdd(count, total)}
-            className="w-full py-4 rounded-xl font-bold text-lg bg-gradient-to-r from-emerald-500 to-teal-500 text-zinc-900 shadow-lg shadow-emerald-500/20 active:scale-95 transition-all">
+            className="w-full py-4 rounded-xl font-bold text-lg bg-gradient-to-r from-emerald-500 to-teal-500 text-white shadow-lg shadow-emerald-500/20 active:scale-95 transition-all">
             Add {count} pcs — {formatUGX(total)}</button>
         </div>
       </div>
@@ -610,7 +610,7 @@ function PaymentModal({ cart, total, onClose, onConfirm }) {
             </div>
             <div className="p-5 text-center bg-zinc-800/30">
               <p className="text-sm text-zinc-500 uppercase tracking-wider">Amount Due</p>
-              <p className="text-4xl font-bold text-amber-400 mt-1" style={{ fontFamily: "'DM Sans', sans-serif" }}>{formatUGX(total)}</p>
+              <p className="text-4xl font-bold text-blue-400 mt-1" style={{ fontFamily: "'DM Sans', sans-serif" }}>{formatUGX(total)}</p>
               <p className="text-sm text-zinc-500 mt-1">{cart.length} items in cart</p>
             </div>
             <div className="p-5 space-y-4">
@@ -618,7 +618,7 @@ function PaymentModal({ cart, total, onClose, onConfirm }) {
                 {[{ id: "cash", label: "Cash", icon: "💵" }, { id: "momo", label: "MoMo", icon: "📱" }, { id: "credit", label: "Credit", icon: "📝" }].map(m => (
                   <button key={m.id} onClick={() => setMethod(m.id)}
                     className={`flex-1 flex flex-col items-center gap-1 p-3 rounded-xl border-2 transition-all ${
-                      method === m.id ? "border-amber-500 bg-amber-500/10 text-amber-400" : "border-zinc-700 bg-zinc-800/50 text-zinc-400 hover:border-zinc-600"
+                      method === m.id ? "border-blue-500 bg-blue-500/10 text-blue-400" : "border-zinc-700 bg-zinc-800/50 text-zinc-400 hover:border-zinc-600"
                     }`}><span className="text-xl">{m.icon}</span><span className="text-xs font-medium">{m.label}</span></button>
                 ))}
               </div>
@@ -626,12 +626,12 @@ function PaymentModal({ cart, total, onClose, onConfirm }) {
                 <div>
                   <label className="text-xs text-zinc-500 mb-2 block uppercase tracking-wider">Amount Received</label>
                   <input type="number" value={amountPaid} onChange={e => setAmountPaid(e.target.value)} placeholder={total.toString()}
-                    className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3 text-2xl text-center text-zinc-100 font-bold focus:outline-none focus:border-amber-500 transition-all font-mono" />
+                    className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3 text-2xl text-center text-zinc-100 font-bold focus:outline-none focus:border-blue-500 transition-all font-mono" />
                   <div className="flex gap-2 mt-3">
                     {quickAmounts.map(a => (
                       <button key={a} onClick={() => setAmountPaid(a.toString())}
                         className={`flex-1 py-2 rounded-lg text-sm font-medium transition-all ${
-                          amountPaid === a.toString() ? "bg-amber-500/20 text-amber-400 border border-amber-500/30" : "bg-zinc-800 text-zinc-400 hover:bg-zinc-700 border border-zinc-700"
+                          amountPaid === a.toString() ? "bg-blue-500/20 text-blue-400 border border-blue-500/30" : "bg-zinc-800 text-zinc-400 hover:bg-zinc-700 border border-zinc-700"
                         }`}>{a >= 1000 ? `${(a/1000).toFixed(0)}K` : a}</button>
                     ))}
                   </div>
@@ -645,7 +645,7 @@ function PaymentModal({ cart, total, onClose, onConfirm }) {
               )}
               <button onClick={handleConfirm} disabled={processing || (method === "cash" && amountPaid && parseFloat(amountPaid) < total)}
                 className={`w-full py-4 rounded-xl font-bold text-lg transition-all active:scale-95 ${
-                  processing ? "bg-zinc-700 text-zinc-400 cursor-wait" : "bg-gradient-to-r from-amber-500 to-orange-500 text-zinc-900 hover:from-amber-400 hover:to-orange-400 shadow-lg shadow-amber-500/20"
+                  processing ? "bg-zinc-700 text-zinc-400 cursor-wait" : "bg-gradient-to-r from-blue-500 to-indigo-500 text-white hover:from-blue-400 hover:to-indigo-400 shadow-lg shadow-blue-500/20"
                 }`}>{processing ? "Processing..." : "Confirm Payment"}</button>
             </div>
           </>
@@ -866,7 +866,7 @@ If confidence is low or you cannot identify: {"product_id": null, "product_name"
         {result && !error && (
           <div className={`rounded-xl p-4 border ${
             result.confidence === "high" ? "bg-emerald-500/10 border-emerald-500/30" :
-            result.confidence === "medium" ? "bg-amber-500/10 border-amber-500/30" :
+            result.confidence === "medium" ? "bg-blue-500/10 border-blue-500/30" :
             "bg-red-500/10 border-red-500/30"
           }`}>
             {result.matched ? (
@@ -876,7 +876,7 @@ If confidence is low or you cannot identify: {"product_id": null, "product_name"
                   <div className="flex items-center gap-2">
                     <p className="text-lg font-bold text-zinc-100">{result.matched.name}</p>
                     <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${
-                      result.confidence === "high" ? "bg-emerald-500/20 text-emerald-400" : "bg-amber-500/20 text-amber-400"
+                      result.confidence === "high" ? "bg-emerald-500/20 text-emerald-400" : "bg-blue-500/20 text-blue-400"
                     }`}>{result.confidence === "high" ? "✓ Sure" : "~ Maybe"}</span>
                   </div>
                   <p className="text-sm text-zinc-400 mt-0.5">{result.notes}</p>
@@ -1112,9 +1112,9 @@ function POSScreen({ products, cart, setCart, onComplete }) {
             </span>
             <input type="text" value={barcodeInput} onChange={e => setBarcodeInput(e.target.value)}
               onKeyDown={e => e.key === "Enter" && handleBarcodeScan()} placeholder="Scan or type barcode..."
-              className="w-full bg-zinc-800/80 border border-amber-500/30 rounded-xl pl-9 pr-3 py-2.5 text-sm text-zinc-100 placeholder-zinc-500 focus:outline-none focus:border-amber-500 transition-all font-mono" />
+              className="w-full bg-zinc-800/80 border border-blue-500/30 rounded-xl pl-9 pr-3 py-2.5 text-sm text-zinc-100 placeholder-zinc-500 focus:outline-none focus:border-blue-500 transition-all font-mono" />
           </div>
-          <button onClick={handleBarcodeScan} className="px-3 bg-amber-500 text-zinc-900 rounded-xl font-bold hover:bg-amber-400 active:scale-95 transition-all shadow-lg shadow-amber-500/20 text-sm">Go</button>
+          <button onClick={handleBarcodeScan} className="px-3 bg-blue-500 text-white rounded-xl font-bold hover:bg-blue-400 active:scale-95 transition-all shadow-lg shadow-blue-500/20 text-sm">Go</button>
           <button onClick={function(){setShowBarcodeScanner(true);}} className="px-3 bg-gradient-to-br from-cyan-500 to-blue-600 text-white rounded-xl font-bold hover:from-cyan-400 active:scale-95 transition-all shadow-lg shadow-cyan-500/20 flex items-center gap-1 text-sm" title="Scan Barcode">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 7V5a2 2 0 012-2h2M17 3h2a2 2 0 012 2v2M21 17v2a2 2 0 01-2 2h-2M7 21H5a2 2 0 01-2-2v-2"/><line x1="7" y1="12" x2="17" y2="12"/></svg>
           </button>
@@ -1135,7 +1135,7 @@ function POSScreen({ products, cart, setCart, onComplete }) {
             <button key={cat} onClick={() => setActiveCategory(cat)}
               className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all whitespace-nowrap ${
                 activeCategory === cat
-                  ? cat === "Favourites" ? "bg-red-500/20 text-red-400 border border-red-500/30" : "bg-amber-500/20 text-amber-400 border border-amber-500/30"
+                  ? cat === "Favourites" ? "bg-red-500/20 text-red-400 border border-red-500/30" : "bg-blue-500/20 text-blue-400 border border-blue-500/30"
                   : "bg-zinc-800/60 text-zinc-500 hover:text-zinc-300 border border-zinc-700/30"
               }`}>{cat === "Favourites" ? "⭐ Favourites" : cat}</button>
           ))}
@@ -1155,9 +1155,9 @@ function POSScreen({ products, cart, setCart, onComplete }) {
             return (
               <button key={p.id} onClick={() => handleProductTap(p)}
                 className={`relative flex items-center gap-3 p-3 rounded-xl border transition-all duration-150 active:scale-[0.97] text-left ${
-                  inCart ? "bg-amber-500/15 border-amber-500/50" : "bg-zinc-800/60 border-zinc-700/20 hover:bg-zinc-800"
+                  inCart ? "bg-blue-500/15 border-blue-500/50" : "bg-zinc-800/60 border-zinc-700/20 hover:bg-zinc-800"
                 }`}>
-                {inCart && <span className="absolute -top-2 -right-2 bg-amber-500 text-zinc-900 text-xs font-bold rounded-full w-5 h-5 flex items-center justify-center shadow-lg z-10">{inCart.qty}</span>}
+                {inCart && <span className="absolute -top-2 -right-2 bg-blue-500 text-zinc-900 text-xs font-bold rounded-full w-5 h-5 flex items-center justify-center shadow-lg z-10">{inCart.qty}</span>}
                 <div className={`w-11 h-11 rounded-xl flex items-center justify-center text-sm font-bold shrink-0 ${
                   p.category === "Beverages" ? "bg-blue-500/20 text-blue-400" :
                   p.category === "Bakery" ? "bg-orange-500/20 text-orange-400" :
@@ -1173,7 +1173,7 @@ function POSScreen({ products, cart, setCart, onComplete }) {
                 }`}>{p.image === "📦" ? p.name.substring(0,2).toUpperCase() : p.image}</div>
                 <div className="flex-1 min-w-0">
                   <p className="text-sm text-zinc-100 font-semibold truncate">{p.name}</p>
-                  <p className="text-xs text-amber-400 font-bold mt-0.5">{priceDisplay}</p>
+                  <p className="text-xs text-blue-400 font-bold mt-0.5">{priceDisplay}</p>
                 </div>
               </button>
             );
@@ -1197,7 +1197,7 @@ function POSScreen({ products, cart, setCart, onComplete }) {
                 {item.type !== "weight" && (
                   <div className="flex items-center gap-1.5">
                     <button onClick={() => updateQty(item.cartKey, -1)} className="w-6 h-6 rounded-md bg-zinc-700 text-zinc-300 flex items-center justify-center hover:bg-zinc-600 active:scale-90 text-sm font-bold">−</button>
-                    <span className="text-amber-400 font-bold w-5 text-center text-sm">{item.qty}</span>
+                    <span className="text-blue-400 font-bold w-5 text-center text-sm">{item.qty}</span>
                     <button onClick={() => updateQty(item.cartKey, 1)} className="w-6 h-6 rounded-md bg-zinc-700 text-zinc-300 flex items-center justify-center hover:bg-zinc-600 active:scale-90 text-sm font-bold">+</button>
                   </div>
                 )}
@@ -1211,10 +1211,10 @@ function POSScreen({ products, cart, setCart, onComplete }) {
           <div className="px-4 pb-4 pt-3 flex items-center gap-3">
             <div className="flex-1">
               <p className="text-xs text-zinc-500 uppercase tracking-wider">Total</p>
-              <p className="text-2xl font-bold text-amber-400" style={{ fontFamily: "'DM Sans', sans-serif" }}>{formatUGX(cartTotal)}</p>
+              <p className="text-2xl font-bold text-blue-400" style={{ fontFamily: "'DM Sans', sans-serif" }}>{formatUGX(cartTotal)}</p>
             </div>
             <button onClick={() => setCart([])} className="px-3 py-3 rounded-xl bg-zinc-800 text-zinc-400 font-medium hover:bg-zinc-700 active:scale-95 transition-all text-sm">Clear</button>
-            <button onClick={onComplete} className="px-6 py-3 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 text-zinc-900 font-bold hover:from-amber-400 hover:to-orange-400 active:scale-95 transition-all shadow-lg shadow-amber-500/20 text-lg">Pay →</button>
+            <button onClick={onComplete} className="px-6 py-3 rounded-xl bg-gradient-to-r from-blue-500 to-indigo-500 text-white font-bold hover:from-blue-400 hover:to-indigo-400 active:scale-95 transition-all shadow-lg shadow-blue-500/20 text-lg">Pay →</button>
           </div>
         </div>
       )}
@@ -1284,7 +1284,7 @@ function InventoryScreen({ products, setProducts }) {
         </div>
         <div className="bg-zinc-800/60 rounded-xl p-3 border border-zinc-700/30">
           <p className="text-xs text-zinc-500">Stock Value</p>
-          <p className="text-lg font-bold text-amber-400">{(totalValue / 1000000).toFixed(1)}M</p>
+          <p className="text-lg font-bold text-blue-400">{(totalValue / 1000000).toFixed(1)}M</p>
         </div>
         <div className={`rounded-xl p-3 border ${lowStockCount > 0 ? "bg-red-500/10 border-red-500/20" : "bg-emerald-500/10 border-emerald-500/20"}`}>
           <p className="text-xs text-zinc-500">Low Stock</p>
@@ -1294,17 +1294,17 @@ function InventoryScreen({ products, setProducts }) {
 
       <div className="px-4 py-2 flex gap-2">
         <div className="flex-1"><SearchInput value={search} onChange={setSearch} placeholder="Search inventory..." /></div>
-        <button onClick={() => setShowAddForm(!showAddForm)} className="px-3 bg-amber-500 text-zinc-900 rounded-xl font-bold hover:bg-amber-400 active:scale-95 transition-all text-sm">+ Add</button>
+        <button onClick={() => setShowAddForm(!showAddForm)} className="px-3 bg-blue-500 text-white rounded-xl font-bold hover:bg-blue-400 active:scale-95 transition-all text-sm">+ Add</button>
         <select value={sortBy} onChange={e => setSortBy(e.target.value)} className="bg-zinc-800 border border-zinc-700/50 rounded-xl px-2 py-2 text-xs text-zinc-300 focus:outline-none">
           <option value="name">A-Z</option><option value="stock-low">Stock ↑</option><option value="price">Price ↓</option>
         </select>
       </div>
 
       {showAddForm && (
-        <div className="mx-4 mb-2 bg-zinc-800/80 border border-amber-500/30 rounded-xl p-4 space-y-3">
-          <h3 className="text-sm font-bold text-amber-400">Add New Product</h3>
+        <div className="mx-4 mb-2 bg-zinc-800/80 border border-blue-500/30 rounded-xl p-4 space-y-3">
+          <h3 className="text-sm font-bold text-blue-400">Add New Product</h3>
           <div className="grid grid-cols-2 gap-2">
-            <input type="text" value={np.name} onChange={e => setNp({...np, name: e.target.value})} placeholder="Product name" className="col-span-2 bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-amber-500" />
+            <input type="text" value={np.name} onChange={e => setNp({...np, name: e.target.value})} placeholder="Product name" className="col-span-2 bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-blue-500" />
             <select value={np.type} onChange={e => setNp({...np, type: e.target.value})} className="bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200">
               <option value="barcode">📦 Barcoded</option><option value="weight">⚖️ By Weight</option><option value="piece">🔢 By Piece</option>
             </select>
@@ -1335,10 +1335,10 @@ function InventoryScreen({ products, setProducts }) {
             </div>
           </div>
           <div className="flex gap-1 flex-wrap">{emojis.map(em => (
-            <button key={em} onClick={() => setNp({...np, image: em})} className={`w-8 h-8 rounded-lg text-lg flex items-center justify-center ${np.image === em ? "bg-amber-500/30 border border-amber-500" : "bg-zinc-900 hover:bg-zinc-700"}`}>{em}</button>
+            <button key={em} onClick={() => setNp({...np, image: em})} className={`w-8 h-8 rounded-lg text-lg flex items-center justify-center ${np.image === em ? "bg-blue-500/30 border border-blue-500" : "bg-zinc-900 hover:bg-zinc-700"}`}>{em}</button>
           ))}</div>
           <div className="flex gap-2 pb-2">
-            <button onClick={handleAddProduct} disabled={!np.name.trim()} className="flex-1 py-3 rounded-lg bg-amber-500 text-zinc-900 font-bold text-sm active:scale-95 disabled:opacity-40">Save Product</button>
+            <button onClick={handleAddProduct} disabled={!np.name.trim()} className="flex-1 py-3 rounded-lg bg-blue-500 text-white font-bold text-sm active:scale-95 disabled:opacity-40">Save Product</button>
             <button onClick={() => setShowAddForm(false)} className="flex-1 py-3 rounded-lg bg-zinc-700 text-zinc-300 font-medium text-sm active:scale-95">Cancel</button>
           </div>
         </div>
@@ -1348,7 +1348,7 @@ function InventoryScreen({ products, setProducts }) {
         {[{ id: "all", label: "All", icon: "📋" }, { id: "barcode", label: "Barcoded", icon: "📦" }, { id: "weight", label: "By Weight", icon: "⚖️" }, { id: "piece", label: "By Piece", icon: "🔢" }, { id: "variant", label: "Variants", icon: "📐" }].map(t => (
           <button key={t.id} onClick={() => setFilterType(t.id)}
             className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all whitespace-nowrap flex items-center gap-1 ${
-              filterType === t.id ? "bg-amber-500/20 text-amber-400 border border-amber-500/30" : "bg-zinc-800/60 text-zinc-500 border border-zinc-700/30 hover:text-zinc-300"
+              filterType === t.id ? "bg-blue-500/20 text-blue-400 border border-blue-500/30" : "bg-zinc-800/60 text-zinc-500 border border-zinc-700/30 hover:text-zinc-300"
             }`}><span>{t.icon}</span> {t.label}</button>
         ))}
       </div>
@@ -1375,8 +1375,8 @@ function InventoryScreen({ products, setProducts }) {
               </div>
               {isEditing ? (
                 <div className="flex items-center gap-1">
-                  <input type="number" value={editValue} onChange={e => setEditValue(e.target.value)} onKeyDown={e => { if(e.key==="Enter") handleStockSave(p.id); }} autoFocus className="w-16 bg-zinc-700 border border-amber-500/50 rounded-lg px-2 py-1 text-sm text-center text-zinc-100 focus:outline-none" />
-                  <button onClick={() => handleStockSave(p.id)} className="w-7 h-7 rounded-lg bg-amber-500/20 text-amber-400 flex items-center justify-center text-sm font-bold">✓</button>
+                  <input type="number" value={editValue} onChange={e => setEditValue(e.target.value)} onKeyDown={e => { if(e.key==="Enter") handleStockSave(p.id); }} autoFocus className="w-16 bg-zinc-700 border border-blue-500/50 rounded-lg px-2 py-1 text-sm text-center text-zinc-100 focus:outline-none" />
+                  <button onClick={() => handleStockSave(p.id)} className="w-7 h-7 rounded-lg bg-blue-500/20 text-blue-400 flex items-center justify-center text-sm font-bold">✓</button>
                   <button onClick={() => {setEditingId(null);setEditValue("");}} className="w-7 h-7 rounded-lg bg-zinc-700 text-zinc-400 flex items-center justify-center text-sm">✕</button>
                 </div>
               ) : (
@@ -1400,9 +1400,9 @@ function HistoryScreen({ sales }) {
   return (
     <div className="flex flex-col h-full">
       <div className="p-4">
-        <div className="bg-gradient-to-br from-amber-500/10 to-orange-500/10 rounded-2xl border border-amber-500/20 p-5">
-          <p className="text-xs text-amber-400/70 uppercase tracking-wider mb-1">Today's Sales</p>
-          <p className="text-3xl font-bold text-amber-400" style={{ fontFamily: "'DM Sans', sans-serif" }}>{formatUGX(todayTotal)}</p>
+        <div className="bg-gradient-to-br from-amber-500/10 to-orange-500/10 rounded-2xl border border-blue-500/20 p-5">
+          <p className="text-xs text-blue-400/70 uppercase tracking-wider mb-1">Today's Sales</p>
+          <p className="text-3xl font-bold text-blue-400" style={{ fontFamily: "'DM Sans', sans-serif" }}>{formatUGX(todayTotal)}</p>
           <div className="flex gap-4 mt-3">
             <div><p className="text-xs text-zinc-500">Transactions</p><p className="text-lg font-bold text-zinc-200">{sales.length}</p></div>
             <div><p className="text-xs text-zinc-500">Gross Profit</p><p className="text-lg font-bold text-emerald-400">{formatUGX(todayProfit)}</p></div>
@@ -1436,7 +1436,7 @@ function HistoryScreen({ sales }) {
                 </div>
                 <div className="flex justify-between mt-2 pt-2 border-t border-zinc-700/30">
                   <span className="text-sm text-zinc-500">Total</span>
-                  <span className="text-amber-400 font-bold">{formatUGX(sale.total)}</span>
+                  <span className="text-blue-400 font-bold">{formatUGX(sale.total)}</span>
                 </div>
               </div>
             ))}
@@ -1463,28 +1463,28 @@ function LoginScreen({ onLogin }) {
   };
 
   return (
-    <div className="min-h-screen bg-zinc-950 flex flex-col items-center justify-center p-6" style={{ background: "radial-gradient(ellipse at 50% 0%, rgba(245,158,11,0.08) 0%, rgba(9,9,11,1) 60%)" }}>
+    <div className="min-h-screen bg-zinc-950 flex flex-col items-center justify-center p-6" style={{ background: "radial-gradient(ellipse at 50% 0%, rgba(59,130,246,0.08) 0%, rgba(9,9,11,1) 60%)" }}>
       <div className="w-full max-w-sm">
         <div className="text-center mb-10">
-          <div className="inline-flex items-center justify-center w-20 h-20 rounded-3xl bg-gradient-to-br from-amber-500 to-orange-600 mb-4 shadow-lg shadow-amber-500/20"><span className="text-4xl">🏪</span></div>
+          <div className="inline-flex items-center justify-center w-20 h-20 rounded-3xl bg-gradient-to-br from-blue-500 to-indigo-600 mb-4 shadow-lg shadow-blue-500/20"><span className="text-4xl">🏪</span></div>
           <h1 className="text-2xl font-bold text-zinc-100 tracking-tight" style={{ fontFamily: "'DM Sans', sans-serif" }}>Oola RetailFlow</h1>
           <p className="text-zinc-500 text-sm mt-1">Point of Sale System</p>
         </div>
         <div className="flex gap-2 mb-6 bg-zinc-900/80 rounded-xl p-1 border border-zinc-800/50">
           {["Admin", "Manager", "Cashier"].map(u => (
-            <button key={u} onClick={() => setUser(u)} className={`flex-1 py-2 rounded-lg text-sm font-medium transition-all ${user === u ? "bg-amber-500/20 text-amber-400 border border-amber-500/30" : "text-zinc-500 hover:text-zinc-300"}`}>{u}</button>
+            <button key={u} onClick={() => setUser(u)} className={`flex-1 py-2 rounded-lg text-sm font-medium transition-all ${user === u ? "bg-blue-500/20 text-blue-400 border border-blue-500/30" : "text-zinc-500 hover:text-zinc-300"}`}>{u}</button>
           ))}
         </div>
         <div className={`flex justify-center gap-3 mb-8 ${shake ? "animate-bounce" : ""}`}>
           {[0,1,2,3].map(i => (
-            <div key={i} className={`w-12 h-12 rounded-xl border-2 flex items-center justify-center transition-all ${i < pin.length ? "border-amber-500 bg-amber-500/10" : "border-zinc-700 bg-zinc-900/50"}`}>
-              {i < pin.length && <div className="w-3 h-3 rounded-full bg-amber-400"/>}
+            <div key={i} className={`w-12 h-12 rounded-xl border-2 flex items-center justify-center transition-all ${i < pin.length ? "border-blue-500 bg-blue-500/10" : "border-zinc-700 bg-zinc-900/50"}`}>
+              {i < pin.length && <div className="w-3 h-3 rounded-full bg-blue-400"/>}
             </div>
           ))}
         </div>
         <div className="grid grid-cols-3 gap-3">
           {["1","2","3","4","5","6","7","8","9","DEL","0","OK"].map(k => (
-            <button key={k} onClick={() => handleKey(k)} className={`h-14 rounded-xl font-semibold text-lg transition-all active:scale-95 ${k === "OK" ? "bg-amber-500 text-zinc-900 hover:bg-amber-400 shadow-lg shadow-amber-500/20" : k === "DEL" ? "bg-zinc-800 text-zinc-400 hover:bg-zinc-700" : "bg-zinc-900 text-zinc-200 hover:bg-zinc-800 border border-zinc-800"}`}>
+            <button key={k} onClick={() => handleKey(k)} className={`h-14 rounded-xl font-semibold text-lg transition-all active:scale-95 ${k === "OK" ? "bg-blue-500 text-white hover:bg-blue-400 shadow-lg shadow-blue-500/20" : k === "DEL" ? "bg-zinc-800 text-zinc-400 hover:bg-zinc-700" : "bg-zinc-900 text-zinc-200 hover:bg-zinc-800 border border-zinc-800"}`}>
               {k === "DEL" ? "⌫" : k}
             </button>
           ))}
@@ -1606,7 +1606,7 @@ function RetailFlowPOS() {
       {/* Header with Sync Status */}
       <header className="flex items-center justify-between px-4 py-3 border-b border-zinc-800/50 bg-zinc-950/80 backdrop-blur-sm">
         <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-amber-500 to-orange-600 flex items-center justify-center shadow-lg shadow-amber-500/10"><span className="text-lg">🏪</span></div>
+          <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-blue-500/10"><span className="text-lg">🏪</span></div>
           <div>
             <h1 className="text-sm font-bold text-zinc-100 leading-none" style={{ fontFamily: "'DM Sans', sans-serif" }}>Oola RetailFlow</h1>
             <p className="text-xs text-zinc-500 leading-none mt-0.5">{(user && user.name ? user.name : "User")} • {new Date().toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })}</p>
@@ -1621,7 +1621,7 @@ function RetailFlowPOS() {
 
             {/* Pending sync count */}
             {pendingCount > 0 && (
-              <span className="flex items-center gap-0.5 text-xs text-amber-400 font-medium">
+              <span className="flex items-center gap-0.5 text-xs text-blue-400 font-medium">
                 <svg width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" className={syncing ? "animate-spin" : ""}><path d="M21 12a9 9 0 11-6.219-8.56"/></svg>
                 {pendingCount}
               </span>
@@ -1648,10 +1648,10 @@ function RetailFlowPOS() {
 
       {/* Offline Banner */}
       {!online && (
-        <div className="bg-amber-500/10 border-b border-amber-500/20 px-4 py-2 flex items-center gap-2">
-          <span className="text-amber-400 text-sm">⚡</span>
-          <p className="text-xs text-amber-300 flex-1">You're offline — sales are saved locally and will sync when internet returns</p>
-          {pendingCount > 0 && <span className="text-xs font-bold text-amber-400">{pendingCount} pending</span>}
+        <div className="bg-blue-500/10 border-b border-blue-500/20 px-4 py-2 flex items-center gap-2">
+          <span className="text-blue-400 text-sm">⚡</span>
+          <p className="text-xs text-blue-300 flex-1">You're offline — sales are saved locally and will sync when internet returns</p>
+          {pendingCount > 0 && <span className="text-xs font-bold text-blue-400">{pendingCount} pending</span>}
         </div>
       )}
 
@@ -1680,7 +1680,7 @@ function RetailFlowPOS() {
 
           <div className="flex items-center justify-between">
             <span className="text-xs text-zinc-400">Pending Sales</span>
-            <span className={`text-xs font-medium ${pendingCount > 0 ? "text-amber-400" : "text-emerald-400"}`}>{pendingCount > 0 ? `${pendingCount} awaiting sync` : "All synced ✓"}</span>
+            <span className={`text-xs font-medium ${pendingCount > 0 ? "text-blue-400" : "text-emerald-400"}`}>{pendingCount > 0 ? `${pendingCount} awaiting sync` : "All synced ✓"}</span>
           </div>
 
           <div className="flex items-center justify-between">
@@ -1690,7 +1690,7 @@ function RetailFlowPOS() {
 
           <div className="flex gap-2 pt-2 border-t border-zinc-800">
             <button onClick={() => { handleManualSync(); setShowSettings(false); }}
-              className="flex-1 py-2 rounded-lg bg-amber-500/20 text-amber-400 text-xs font-medium hover:bg-amber-500/30 transition-all">
+              className="flex-1 py-2 rounded-lg bg-blue-500/20 text-blue-400 text-xs font-medium hover:bg-blue-500/30 transition-all">
               ↻ Sync Now
             </button>
             <button onClick={() => setShowSettings(false)}
@@ -1704,7 +1704,7 @@ function RetailFlowPOS() {
       {/* Loading indicator */}
       {loading && (
         <div className="flex items-center justify-center py-8">
-          <div className="w-8 h-8 border-3 border-amber-500 border-t-transparent rounded-full animate-spin" />
+          <div className="w-8 h-8 border-3 border-blue-500 border-t-transparent rounded-full animate-spin" />
         </div>
       )}
 
@@ -1718,11 +1718,11 @@ function RetailFlowPOS() {
       <nav className="flex border-t border-zinc-800/50 bg-zinc-950/95 backdrop-blur-sm px-2 pb-1 pt-1">
         {tabs.map(tab => (
           <button key={tab.id} onClick={() => setActiveTab(tab.id)}
-            className={`flex-1 flex flex-col items-center py-2 gap-0.5 transition-all relative ${activeTab === tab.id ? "text-amber-400" : "text-zinc-600 hover:text-zinc-400"}`}>
-            {activeTab === tab.id && <div className="absolute -top-1 w-8 h-0.5 rounded-full bg-amber-400" />}
+            className={`flex-1 flex flex-col items-center py-2 gap-0.5 transition-all relative ${activeTab === tab.id ? "text-blue-400" : "text-zinc-600 hover:text-zinc-400"}`}>
+            {activeTab === tab.id && <div className="absolute -top-1 w-8 h-0.5 rounded-full bg-blue-400" />}
             {tab.icon}
             <span className="text-xs font-medium">{tab.label}</span>
-            {tab.id === "pos" && cartCount > 0 && <span className="absolute top-1 right-1/4 bg-amber-500 text-zinc-900 text-xs font-bold rounded-full w-4 h-4 flex items-center justify-center">{cartCount}</span>}
+            {tab.id === "pos" && cartCount > 0 && <span className="absolute top-1 right-1/4 bg-blue-500 text-zinc-900 text-xs font-bold rounded-full w-4 h-4 flex items-center justify-center">{cartCount}</span>}
           </button>
         ))}
       </nav>
