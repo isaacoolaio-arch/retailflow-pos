@@ -12,8 +12,8 @@
     <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
     <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
     <style>
         *{-webkit-tap-highlight-color:transparent}
         body{margin:0;padding:0;overflow:hidden;background:#09090b}
@@ -47,23 +47,17 @@ const DEVICE_ID = "device_" + Math.random().toString(36).substr(2, 8);
 // ─── IndexedDB Offline Cache ──────────────────────────────────
 
 const DB_NAME = "OolaRetailFlowDB";
-const DB_VERSION = 2;
+const DB_VERSION = 1;
 
 function openDB() {
   return new Promise((resolve, reject) => {
     const req = indexedDB.open(DB_NAME, DB_VERSION);
     req.onupgradeneeded = (e) => {
       const db = e.target.result;
-      // v1 stores
-      if (!db.objectStoreNames.contains("products"))     db.createObjectStore("products",     { keyPath: "id" });
+      if (!db.objectStoreNames.contains("products")) db.createObjectStore("products", { keyPath: "id" });
       if (!db.objectStoreNames.contains("pendingSales")) db.createObjectStore("pendingSales", { keyPath: "offlineId" });
-      if (!db.objectStoreNames.contains("syncedSales"))  db.createObjectStore("syncedSales",  { keyPath: "id" });
-      if (!db.objectStoreNames.contains("meta"))         db.createObjectStore("meta",         { keyPath: "key" });
-      // v2 stores — new modules
-      if (!db.objectStoreNames.contains("purchases"))    db.createObjectStore("purchases",    { keyPath: "purchaseId" });
-      if (!db.objectStoreNames.contains("expenses"))     db.createObjectStore("expenses",     { keyPath: "expenseId" });
-      if (!db.objectStoreNames.contains("adjustments"))  db.createObjectStore("adjustments",  { keyPath: "adjustId" });
-      if (!db.objectStoreNames.contains("customers"))    db.createObjectStore("customers",    { keyPath: "customerId" });
+      if (!db.objectStoreNames.contains("syncedSales")) db.createObjectStore("syncedSales", { keyPath: "id" });
+      if (!db.objectStoreNames.contains("meta")) db.createObjectStore("meta", { keyPath: "key" });
     };
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
@@ -114,14 +108,6 @@ async function dbClear(storeName) {
 
 // ─── API Service ──────────────────────────────────────────────
 
-// Wraps a fetch promise with a timeout
-function fetchWithTimeout(promise, ms) {
-  const timeout = new Promise((_, reject) =>
-    setTimeout(() => reject(new Error("timeout")), ms)
-  );
-  return Promise.race([promise, timeout]);
-}
-
 const api = {
   isConfigured: () => !!API_URL,
 
@@ -131,40 +117,26 @@ const api = {
     url.searchParams.set("action", action);
     Object.keys(params).forEach(k => url.searchParams.set(k, params[k]));
     try {
-      const res = await fetchWithTimeout(
-        fetch(url.toString(), { redirect: "follow" }),
-        8000  // 8 second timeout
-      );
+      const res = await fetch(url.toString(), { redirect: "follow" });
       return await res.json();
     } catch (e) {
-      console.warn("API GET failed:", e.message);
+      console.warn("API GET failed:", e);
       return null;
     }
   },
 
-  // ── CRITICAL: Content-Type must be "text/plain" for Apps Script ──
-  // Apps Script 302-redirects cross-origin requests. Browsers convert
-  // POST→GET when following a 302, dropping the body entirely, so
-  // doPost() never fires. Using text/plain avoids the CORS preflight
-  // and sends the POST body directly — doPost() receives it correctly.
   async post(action, data = {}) {
     if (!API_URL) return null;
     try {
-      const body = JSON.stringify({ action, ...data, deviceId: DEVICE_ID });
-      const res = await fetchWithTimeout(
-        fetch(API_URL, {
-          method: "POST",
-          headers: { "Content-Type": "text/plain;charset=utf-8" },
-          body,
-          redirect: "follow"
-        }),
-        35000  // 35 second timeout — Apps Script cold start can take 20–30s
-      );
-      const text = await res.text();
-      try { return JSON.parse(text); }
-      catch (e) { console.warn("API POST non-JSON response:", text); return null; }
+      const res = await fetch(API_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action, ...data, deviceId: DEVICE_ID }),
+        redirect: "follow"
+      });
+      return await res.json();
     } catch (e) {
-      console.warn("API POST failed:", e.message);
+      console.warn("API POST failed:", e);
       return null;
     }
   }
@@ -249,98 +221,44 @@ function useOnlineStatus() {
 
 // ─── Data Loading Hook ────────────────────────────────────────
 
-// Force barcode (and id) to string — Google Sheets stores numeric barcodes
-// as numbers, which breaks strict === comparison with the scanner string output.
-function normaliseProduct(p) {
-  return p ? { ...p, id: String(p.id || ""), barcode: String(p.barcode || "").trim(), photo: p.photo || "" } : p;
-}
-
-function normaliseProducts(arr) {
-  return (arr || []).map(normaliseProduct);
-}
-
 function useProducts() {
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [source, setSource] = useState("loading");
-
-  // Merge API products with any locally-added ones not yet in the API
-  const mergeWithLocal = async (apiProducts) => {
-    try {
-      const cached = await dbGetAll("products");
-      const normCached = normaliseProducts(cached);
-
-      // Build a map of local products by ID for quick lookup
-      const localById = {};
-      normCached.forEach(p => { localById[p.id] = p; });
-
-      const apiIds = new Set(apiProducts.map(p => p.id));
-
-      // For each API product, restore any locally-stored photo that Sheets doesn't carry
-      const merged = apiProducts.map(p => {
-        const local = localById[p.id];
-        if (local && local.photo && !p.photo) {
-          return { ...p, photo: local.photo };
-        }
-        return p;
-      });
-
-      // Also append any locally-added products not yet in Sheets
-      const localOnly = normCached.filter(p => !apiIds.has(p.id) && !DEMO_IDS.has(p.id));
-      return [...merged, ...localOnly];
-    } catch (e) {
-      return apiProducts;
-    }
-  };
+  const [source, setSource] = useState("loading"); // "api", "cache", "demo"
 
   useEffect(() => {
     const load = async () => {
       setLoading(true);
 
-      // Remove any demo/mock data from IndexedDB before loading
-      await cleanupDemoData();
-
-      // 1. Load from IndexedDB cache immediately — normalise barcodes to string
+      // 1. Try loading from IndexedDB cache first (instant)
       try {
         const cached = await dbGetAll("products");
         if (cached.length > 0) {
-          setProducts(normaliseProducts(cached));
+          setProducts(cached);
           setSource("cache");
           setLoading(false);
         }
       } catch (e) { /* continue */ }
 
-      // 2. Background refresh from API — normalise + merge
+      // 2. Try fetching from API (background refresh)
       if (api.isConfigured()) {
-        try {
-          const result = await api.get("getProducts");
-          if (result && result.success && result.products) {
-            const normed = normaliseProducts(result.products);
-            const merged = await mergeWithLocal(normed);
-            setProducts(merged);
-            setSource("api");
-            // Write normalised merged list back to IndexedDB
-            await dbClear("products");
-            await dbPut("products", merged);
-            await dbPut("meta", { key: "lastProductSync", value: new Date().toISOString() });
-            setLoading(false);
-            return;
-          }
-        } catch (e) { /* network error — keep showing cache */ }
+        const result = await api.get("getProducts");
+        if (result && result.success && result.products) {
+          setProducts(result.products);
+          setSource("api");
+          // Cache products for offline
+          await dbClear("products");
+          await dbPut("products", result.products);
+          await dbPut("meta", { key: "lastProductSync", value: new Date().toISOString() });
+          setLoading(false);
+          return;
+        }
       }
 
-      // 3. Fallback to demo data ONLY if API is NOT configured
-      if (!api.isConfigured()) {
-        try {
-          const cached = await dbGetAll("products");
-          if (cached.length === 0) {
-            setProducts(MOCK_PRODUCTS);
-            setSource("demo");
-          }
-        } catch(e) {
-          setProducts(MOCK_PRODUCTS);
-          setSource("demo");
-        }
+      // 3. Fallback to demo data if nothing else worked
+      if (products.length === 0) {
+        setProducts(MOCK_PRODUCTS);
+        setSource("demo");
       }
       setLoading(false);
     };
@@ -349,49 +267,47 @@ function useProducts() {
 
   const refreshProducts = async () => {
     if (!api.isConfigured()) return;
-    try {
-      const result = await api.get("getProducts");
-      if (result && result.success && result.products) {
-        const normed = normaliseProducts(result.products);
-        const merged = await mergeWithLocal(normed);
-        setProducts(merged);
-        setSource("api");
-        await dbClear("products");
-        await dbPut("products", merged);
-      }
-    } catch (e) { /* silent */ }
+    const result = await api.get("getProducts");
+    if (result && result.success && result.products) {
+      setProducts(result.products);
+      setSource("api");
+      await dbClear("products");
+      await dbPut("products", result.products);
+    }
   };
 
   return { products, setProducts, loading, source, refreshProducts };
 }
 
-// ─── Demo data cleanup ────────────────────────────────────────
-// When API is configured, purge any demo/mock products and stale
-// sales from IndexedDB so they never appear in the real app.
-const DEMO_IDS = new Set([
-  "P001","P002","P003","P004","P005","P006","P007","P008",
-  "W001","W002","W003","W004","W005","W006","W007","W008",
-  "PC01","PC02","PC03","PC04",
-  "V001","V002","V003"
-]);
+// ─── Product Types ────────────────────────────────────────────
 
-async function cleanupDemoData() {
-  if (!api.isConfigured()) return;
+// ─── Supermarket Beep Sound ───────────────────────────────────
+function playBeep() {
   try {
-    // Remove any demo products from the products cache
-    const cached = await dbGetAll("products");
-    const hasDemoProducts = cached.some(p => DEMO_IDS.has(p.id));
-    if (hasDemoProducts) {
-      const real = cached.filter(p => !DEMO_IDS.has(p.id));
-      await dbClear("products");
-      if (real.length > 0) await dbPut("products", real);
-      console.log("[cleanup] Removed demo products from IndexedDB cache");
-    }
-    // Remove any demo/fake sales (those with OFF_ IDs that were never real)
-    // We don't touch pendingSales — those are legitimate offline sales
-  } catch (e) { /* silent */ }
+    var ctx = new (window.AudioContext || window.webkitAudioContext)();
+    var osc1 = ctx.createOscillator();
+    var gain1 = ctx.createGain();
+    osc1.type = "square";
+    osc1.frequency.setValueAtTime(2637, ctx.currentTime);
+    gain1.gain.setValueAtTime(0.3, ctx.currentTime);
+    gain1.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.08);
+    osc1.connect(gain1);
+    gain1.connect(ctx.destination);
+    osc1.start(ctx.currentTime);
+    osc1.stop(ctx.currentTime + 0.08);
+    var osc2 = ctx.createOscillator();
+    var gain2 = ctx.createGain();
+    osc2.type = "square";
+    osc2.frequency.setValueAtTime(1975, ctx.currentTime + 0.09);
+    gain2.gain.setValueAtTime(0.25, ctx.currentTime + 0.09);
+    gain2.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.18);
+    osc2.connect(gain2);
+    gain2.connect(ctx.destination);
+    osc2.start(ctx.currentTime + 0.09);
+    osc2.stop(ctx.currentTime + 0.18);
+    setTimeout(function() { ctx.close(); }, 300);
+  } catch(e) {}
 }
-
 
 // "barcode"  → scan/type barcode, add by unit
 // "weight"   → tap product, enter weight (kg), price = rate × weight
@@ -468,54 +384,6 @@ const TYPE_LABELS = {
 
 const ALL_CATEGORIES = ["All", "Favourites", ...new Set(MOCK_PRODUCTS.map(p => p.category))];
 const formatUGX = (amount) => `UGX ${Math.round(amount).toLocaleString()}`;
-
-// ─── Scan feedback: beep + vibration ─────────────────────────
-function playBeep(type) {
-  // type: "success" | "error" | "snap"
-  try {
-    var ctx = new (window.AudioContext || window.webkitAudioContext)();
-    var osc = ctx.createOscillator();
-    var gain = ctx.createGain();
-    osc.connect(gain);
-    gain.connect(ctx.destination);
-
-    if (type === "error") {
-      osc.frequency.setValueAtTime(220, ctx.currentTime);
-      osc.frequency.exponentialRampToValueAtTime(110, ctx.currentTime + 0.3);
-      gain.gain.setValueAtTime(0.4, ctx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.35);
-      osc.start(ctx.currentTime);
-      osc.stop(ctx.currentTime + 0.35);
-    } else if (type === "snap") {
-      // Double-beep for AI camera snap
-      osc.frequency.setValueAtTime(880, ctx.currentTime);
-      osc.frequency.setValueAtTime(1200, ctx.currentTime + 0.1);
-      gain.gain.setValueAtTime(0.3, ctx.currentTime);
-      gain.gain.setValueAtTime(0.3, ctx.currentTime + 0.1);
-      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.25);
-      osc.start(ctx.currentTime);
-      osc.stop(ctx.currentTime + 0.25);
-    } else {
-      // success — single clean high beep
-      osc.frequency.setValueAtTime(1400, ctx.currentTime);
-      osc.frequency.exponentialRampToValueAtTime(1600, ctx.currentTime + 0.08);
-      gain.gain.setValueAtTime(0.4, ctx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.12);
-      osc.start(ctx.currentTime);
-      osc.stop(ctx.currentTime + 0.12);
-    }
-    setTimeout(function(){ try{ ctx.close(); }catch(e){} }, 500);
-  } catch(e) { /* AudioContext not available */ }
-
-  // Vibration — works on Android Chrome
-  try {
-    if (navigator.vibrate) {
-      if (type === "error")   navigator.vibrate([100, 50, 100]);
-      else if (type === "snap") navigator.vibrate([30, 40, 60]);
-      else                    navigator.vibrate(60);
-    }
-  } catch(e) {}
-}
 
 function SearchInput({ value, onChange, placeholder, autoFocus }) {
   return (
@@ -897,20 +765,13 @@ If confidence is low or you cannot identify: {"product_id": null, "product_name"
         if (parsed.product_id && parsed.confidence !== "low") {
           const matchedProduct = products.find(p => p.id === parsed.product_id);
           if (matchedProduct) {
-            playBeep("snap");
             setResult({ ...parsed, matched: matchedProduct });
-          } else {
-            playBeep("error");
           }
-        } else {
-          playBeep("error");
         }
       } catch {
-        playBeep("error");
         setError("Could not parse AI response. Try again.");
       }
     } catch (err) {
-      playBeep("error");
       setError("Failed to connect to AI. Check your internet connection.");
     }
 
@@ -1085,7 +946,6 @@ function BarcodeScannerModal({ onScan, onClose }) {
         { facingMode: "environment" },
         { fps: 10, qrbox: { width: 280, height: 150 }, aspectRatio: 1.777 },
         function(decodedText) {
-          playBeep("success");
           scanner.stop().then(function() {
             onScan(decodedText);
           }).catch(function() { onScan(decodedText); });
@@ -1139,14 +999,9 @@ function POSScreen({ products, cart, setCart, onComplete }) {
   const [showCamera, setShowCamera] = useState(false);
   const [showBarcodeScanner, setShowBarcodeScanner] = useState(false);
   const [favourites] = useState(["W001", "PC01", "W003", "PC05", "V002", "V004"]);
-  const [toast, setToast] = useState(null);
-
-  const showToast = (msg, type) => {
-    setToast({ msg, type: type || "info" });
-    setTimeout(() => setToast(null), 3000);
-  };
 
   const addBarcodeProduct = useCallback((product) => {
+    playBeep();
     setCart(prev => {
       const key = product.id;
       const exists = prev.find(c => c.cartKey === key);
@@ -1156,12 +1011,14 @@ function POSScreen({ products, cart, setCart, onComplete }) {
   }, [setCart]);
 
   const addWeightProduct = (product, weight, total) => {
+    playBeep();
     const key = `${product.id}_${Date.now()}`;
     setCart(prev => [...prev, { cartKey: key, id: product.id, name: `${product.name} (${weight}kg)`, image: product.image, qty: 1, unitPrice: total, lineTotal: total, unit: `${weight}kg`, type: "weight", weight, cost: product.cost * weight }]);
     setWeightModal(null);
   };
 
   const addPieceProduct = (product, count, total) => {
+    playBeep();
     setCart(prev => {
       const key = product.id;
       const exists = prev.find(c => c.cartKey === key);
@@ -1172,6 +1029,7 @@ function POSScreen({ products, cart, setCart, onComplete }) {
   };
 
   const addVariantProduct = (product, variantIdx, qty, total) => {
+    playBeep();
     const variant = product.variants[variantIdx];
     const key = `${product.id}_v${variantIdx}`;
     setCart(prev => {
@@ -1206,21 +1064,19 @@ function POSScreen({ products, cart, setCart, onComplete }) {
   const handleBarcodeScan = () => {
     if (!barcodeInput.trim()) return;
     const query = barcodeInput.trim();
-    const norm = (v) => String(v || "").trim();
-
-    // Try barcode match — normalise both sides to string to handle numeric barcodes from Sheets
-    let found = products.find(p => p.barcode && norm(p.barcode) === norm(query));
-    // Then try product ID
-    if (!found) found = products.find(p => norm(p.id).toLowerCase() === norm(query).toLowerCase());
-    // Then try name
+    // Try barcode match first
+    let found = products.find(p => p.barcode && p.barcode === query);
+    // Then try product ID match
+    if (!found) found = products.find(p => p.id.toLowerCase() === query.toLowerCase());
+    // Then try name match
     if (!found) found = products.find(p => p.name.toLowerCase().includes(query.toLowerCase()));
-
     if (found) {
+      playBeep();
       handleProductTap(found);
       setBarcodeInput("");
     } else {
-      playBeep("error");
-      showToast("Barcode " + query + " not found — add it in Stock tab first", "warn");
+      // Flash the input red briefly to indicate not found
+      alert("Product not found: " + query);
     }
   };
 
@@ -1246,61 +1102,46 @@ function POSScreen({ products, cart, setCart, onComplete }) {
   const cartItemCount = cart.reduce((sum, c) => sum + c.qty, 0);
 
   return (
-    <div className="flex flex-col h-full" style={{background:"#f4f4f5"}}>
-
-      {/* ── Barcode row ── */}
-      <div className="px-3 pt-3 pb-2" style={{background:"#f4f4f5"}}>
+    <div className="flex flex-col h-full">
+      <div className="p-4 pb-2">
         <div className="flex gap-2">
           <div className="flex-1 relative">
-            <span className="absolute left-3 top-1/2 -translate-y-1/2" style={{color:"#f59e0b"}}>
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><path d="M3 7V5a2 2 0 012-2h2M17 3h2a2 2 0 012 2v2M21 17v2a2 2 0 01-2 2h-2M7 21H5a2 2 0 01-2-2v-2"/><line x1="7" y1="12" x2="17" y2="12"/><line x1="12" y1="7" x2="12" y2="17"/></svg>
+            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-amber-500">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 7V5a2 2 0 012-2h2M17 3h2a2 2 0 012 2v2M21 17v2a2 2 0 01-2 2h-2M7 21H5a2 2 0 01-2-2v-2"/><line x1="7" y1="12" x2="17" y2="12"/><line x1="12" y1="7" x2="12" y2="17"/></svg>
             </span>
             <input type="text" value={barcodeInput} onChange={e => setBarcodeInput(e.target.value)}
-              onKeyDown={e => e.key === "Enter" && handleBarcodeScan()} placeholder="Scan or type barcode..."
-              style={{background:"#fff",border:"1.5px solid #d4d4d8",color:"#18181b",borderRadius:"12px",paddingLeft:"38px",paddingRight:"12px",paddingTop:"10px",paddingBottom:"10px",width:"100%",fontSize:"13px",fontFamily:"monospace",outline:"none"}}
-              onFocus={e => e.target.style.borderColor="#f59e0b"}
-              onBlur={e => e.target.style.borderColor="#d4d4d8"}
-            />
+              onKeyDown={e => e.key === "Enter" && handleBarcodeScan()} placeholder="Scan barcode..."
+              className="w-full bg-zinc-800/80 border border-amber-500/30 rounded-xl pl-11 pr-4 py-3 text-zinc-100 placeholder-zinc-500 focus:outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-500/20 transition-all font-mono" />
           </div>
-          <button onClick={handleBarcodeScan} style={{padding:"0 16px",background:"#f59e0b",color:"#1a0a00",borderRadius:"12px",fontWeight:"800",fontSize:"13px",border:"none",flexShrink:0}} className="active:scale-95 transition-all">Go</button>
-          <button onClick={() => setShowBarcodeScanner(true)} style={{width:"40px",height:"40px",background:"#fff",border:"1.5px solid #d4d4d8",borderRadius:"12px",display:"flex",alignItems:"center",justifyContent:"center",color:"#52525b",flexShrink:0}} className="active:scale-90 transition-all">
+          <button onClick={handleBarcodeScan} className="px-3 bg-amber-500 text-zinc-900 rounded-xl font-bold hover:bg-amber-400 active:scale-95 transition-all shadow-lg shadow-amber-500/20 text-sm">Go</button>
+          <button onClick={function(){setShowBarcodeScanner(true);}} className="px-3 bg-gradient-to-br from-cyan-500 to-blue-600 text-white rounded-xl font-bold hover:from-cyan-400 active:scale-95 transition-all shadow-lg shadow-cyan-500/20 flex items-center gap-1 text-sm" title="Scan Barcode">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 7V5a2 2 0 012-2h2M17 3h2a2 2 0 012 2v2M21 17v2a2 2 0 01-2 2h-2M7 21H5a2 2 0 01-2-2v-2"/><line x1="7" y1="12" x2="17" y2="12"/></svg>
           </button>
-          <button onClick={() => setShowCamera(true)} style={{width:"40px",height:"40px",background:"#2563eb",border:"none",borderRadius:"12px",display:"flex",alignItems:"center",justifyContent:"center",color:"#fff",flexShrink:0}} className="active:scale-90 transition-all">
-            <svg width="17" height="17" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z"/><circle cx="12" cy="13" r="4"/></svg>
+          <button onClick={() => setShowCamera(true)} className="px-3 bg-gradient-to-br from-cyan-500 to-blue-600 text-white rounded-xl font-bold hover:from-cyan-400 hover:to-blue-500 active:scale-95 transition-all shadow-lg shadow-cyan-500/20 flex items-center gap-1" title="AI Camera">
+            <svg width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z"/><circle cx="12" cy="13" r="4"/></svg>
+            <span className="text-xs">AI</span>
           </button>
         </div>
       </div>
 
-      {/* ── Search ── */}
-      <div className="px-3 pb-2">
-        <div className="relative">
-          <svg className="absolute left-3 top-1/2 -translate-y-1/2" style={{color:"#a1a1aa"}} width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
-          <input type="text" value={search} onChange={e => setSearch(e.target.value)}
-            placeholder="Search products by name..."
-            style={{background:"#fff",border:"1.5px solid #d4d4d8",color:"#18181b",borderRadius:"12px",paddingLeft:"34px",paddingRight:"12px",paddingTop:"9px",paddingBottom:"9px",width:"100%",fontSize:"13px",outline:"none"}}
-            onFocus={e => e.target.style.borderColor="#a1a1aa"}
-            onBlur={e => e.target.style.borderColor="#d4d4d8"}
-          />
-        </div>
+      <div className="px-4 pb-2">
+        <SearchInput value={search} onChange={setSearch} placeholder="Search products by name..." />
       </div>
 
-      {/* ── Category chips ── */}
-      <div className="px-3 pb-2 overflow-x-auto" style={{scrollbarWidth:"none"}}>
-        <div className="flex gap-1.5 min-w-max">
+      <div className="px-4 pb-2 overflow-x-auto">
+        <div className="flex gap-2 min-w-max">
           {ALL_CATEGORIES.map(cat => (
             <button key={cat} onClick={() => setActiveCategory(cat)}
-              style={activeCategory === cat
-                ? {padding:"5px 12px",borderRadius:"999px",fontSize:"12px",fontWeight:"700",border:"none",background: cat === "Favourites" ? "#ef4444" : "#f59e0b",color: cat === "Favourites" ? "#fff" : "#1a0a00",whiteSpace:"nowrap"}
-                : {padding:"5px 12px",borderRadius:"999px",fontSize:"12px",fontWeight:"600",border:"1.5px solid #d4d4d8",background:"#fff",color:"#52525b",whiteSpace:"nowrap"}
-              }
-            >{cat === "Favourites" ? "⭐ Fav" : cat}</button>
+              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all whitespace-nowrap ${
+                activeCategory === cat
+                  ? cat === "Favourites" ? "bg-red-500/20 text-red-400 border border-red-500/30" : "bg-amber-500/20 text-amber-400 border border-amber-500/30"
+                  : "bg-zinc-800/60 text-zinc-500 hover:text-zinc-300 border border-zinc-700/30"
+              }`}>{cat === "Favourites" ? "⭐ Favourites" : cat}</button>
           ))}
         </div>
       </div>
 
-      {/* ── Product grid ── */}
-      <div className="flex-1 overflow-y-auto px-3 pb-2">
+      <div className="flex-1 overflow-y-auto px-4 pb-2">
         <div className="grid grid-cols-3 gap-2">
           {filtered.map(p => {
             const typeInfo = TYPE_LABELS[p.type];
@@ -1312,1546 +1153,227 @@ function POSScreen({ products, cart, setCart, onComplete }) {
 
             return (
               <button key={p.id} onClick={() => handleProductTap(p)}
-                style={inCart
-                  ? {background:"#fffbeb",border:"2px solid #f59e0b",borderRadius:"16px",padding:"10px 6px 8px",display:"flex",flexDirection:"column",alignItems:"center",position:"relative",transition:"all 0.15s",boxShadow:"0 2px 8px rgba(245,158,11,0.25)"}
-                  : {background:"#ffffff",border:"1.5px solid #e4e4e7",borderRadius:"16px",padding:"10px 6px 8px",display:"flex",flexDirection:"column",alignItems:"center",position:"relative",transition:"all 0.15s",boxShadow:"0 1px 3px rgba(0,0,0,0.06)"}
-                }
-                className="active:scale-95"
-              >
-                {/* Type badge */}
-                <span className={`absolute top-1.5 left-1.5 px-1 py-0.5 rounded font-bold border ${typeInfo.color}`} style={{fontSize:"8px"}}>{typeInfo.icon}</span>
-                {/* Cart qty badge */}
-                {inCart && (
-                  <span style={{position:"absolute",top:"-8px",right:"-8px",background:"#f59e0b",color:"#1a0a00",fontSize:"11px",fontWeight:"900",borderRadius:"999px",width:"20px",height:"20px",display:"flex",alignItems:"center",justifyContent:"center",boxShadow:"0 2px 6px rgba(245,158,11,0.5)",zIndex:10}}>{inCart.qty}</span>
-                )}
-                {/* Image */}
-                {p.photo
-                  ? <img src={p.photo} alt={p.name} style={{width:"40px",height:"40px",objectFit:"cover",borderRadius:"10px",marginBottom:"4px"}} />
-                  : <span style={{fontSize:"28px",marginBottom:"4px",lineHeight:1}}>{p.image}</span>
-                }
-                {/* Name */}
-                <span style={{fontSize:"11px",fontWeight:"600",color: inCart ? "#92400e" : "#18181b",textAlign:"center",lineHeight:"1.3",display:"-webkit-box",WebkitLineClamp:2,WebkitBoxOrient:"vertical",overflow:"hidden",width:"100%"}}>{p.name}</span>
-                {/* Price */}
-                <span style={{fontSize:"11px",fontWeight:"800",color:"#d97706",marginTop:"3px"}}>{priceDisplay}</span>
+                className={`relative flex flex-col items-center p-2.5 rounded-2xl border transition-all duration-200 active:scale-95 ${
+                  inCart ? "bg-amber-500/10 border-amber-500/40" : "bg-zinc-800/40 border-zinc-700/20 hover:bg-zinc-800/70"
+                }`}>
+                <span className={`absolute top-1.5 left-1.5 px-1.5 py-0.5 rounded-md text-xs font-semibold border ${typeInfo.color}`} style={{ fontSize: "9px" }}>{typeInfo.icon}</span>
+                {inCart && <span className="absolute -top-1.5 -right-1.5 bg-amber-500 text-zinc-900 text-xs font-bold rounded-full w-5 h-5 flex items-center justify-center shadow">{inCart.qty}</span>}
+                <span className="text-2xl mb-1 mt-1">{p.image}</span>
+                <span className="text-xs text-zinc-300 text-center leading-tight line-clamp-2 font-medium">{p.name}</span>
+                <span className="text-xs text-amber-400 font-bold mt-0.5">{priceDisplay}</span>
               </button>
             );
           })}
         </div>
         {filtered.length === 0 && (
-          <div style={{textAlign:"center",padding:"48px 0"}}>
-            <span style={{fontSize:"36px",display:"block",marginBottom:"8px"}}>🔍</span>
-            <p style={{color:"#71717a",fontSize:"14px"}}>No products found</p>
-          </div>
+          <div className="text-center py-12"><span className="text-4xl mb-3 block">🔍</span><p className="text-zinc-500">No products found</p></div>
         )}
       </div>
 
-      {/* ── Cart panel ── */}
       {cart.length > 0 && (
-        <div style={{background:"#fff",borderTop:"2px solid #e4e4e7"}}>
-          {/* Cart items */}
-          <div style={{maxHeight:"144px",overflowY:"auto",padding:"10px 12px 0"}}>
+        <div className="border-t border-zinc-800 bg-zinc-900/95 backdrop-blur-sm">
+          <div className="max-h-36 overflow-y-auto px-4 pt-3">
             {cart.map(item => (
-              <div key={item.cartKey} style={{display:"flex",alignItems:"center",gap:"8px",marginBottom:"6px",background:"#f4f4f5",borderRadius:"12px",padding:"8px 10px",border:"1px solid #e4e4e7"}}>
-                {item.photo
-                  ? <img src={item.photo} alt={item.name} style={{width:"28px",height:"28px",objectFit:"cover",borderRadius:"7px",flexShrink:0}} />
-                  : <span style={{fontSize:"18px",flexShrink:0}}>{item.image}</span>
-                }
-                <div style={{flex:1,minWidth:0}}>
-                  <p style={{fontSize:"12px",fontWeight:"700",color:"#18181b",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{item.name}</p>
-                  <p style={{fontSize:"11px",color:"#71717a"}}>{item.type === "weight" ? item.unit : `${formatUGX(item.unitPrice)} × ${item.qty}`}</p>
+              <div key={item.cartKey} className="flex items-center gap-2 mb-2 bg-zinc-800/50 rounded-xl px-3 py-2">
+                <span className="text-base">{item.image}</span>
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs text-zinc-200 truncate font-medium">{item.name}</p>
+                  <p className="text-xs text-zinc-500">{item.type === "weight" ? item.unit : `${formatUGX(item.unitPrice)} × ${item.qty}`}</p>
                 </div>
                 {item.type !== "weight" && (
-                  <div style={{display:"flex",alignItems:"center",gap:"4px",flexShrink:0}}>
-                    <button onClick={() => updateQty(item.cartKey, -1)} style={{width:"26px",height:"26px",borderRadius:"8px",background:"#e4e4e7",border:"none",color:"#18181b",fontWeight:"800",fontSize:"16px",display:"flex",alignItems:"center",justifyContent:"center"}} className="active:scale-90">−</button>
-                    <span style={{fontWeight:"800",color:"#d97706",width:"20px",textAlign:"center",fontSize:"13px"}}>{item.qty}</span>
-                    <button onClick={() => updateQty(item.cartKey, 1)} style={{width:"26px",height:"26px",borderRadius:"8px",background:"#e4e4e7",border:"none",color:"#18181b",fontWeight:"800",fontSize:"16px",display:"flex",alignItems:"center",justifyContent:"center"}} className="active:scale-90">+</button>
+                  <div className="flex items-center gap-1.5">
+                    <button onClick={() => updateQty(item.cartKey, -1)} className="w-6 h-6 rounded-md bg-zinc-700 text-zinc-300 flex items-center justify-center hover:bg-zinc-600 active:scale-90 text-sm font-bold">−</button>
+                    <span className="text-amber-400 font-bold w-5 text-center text-sm">{item.qty}</span>
+                    <button onClick={() => updateQty(item.cartKey, 1)} className="w-6 h-6 rounded-md bg-zinc-700 text-zinc-300 flex items-center justify-center hover:bg-zinc-600 active:scale-90 text-sm font-bold">+</button>
                   </div>
                 )}
-                <span style={{fontSize:"12px",fontWeight:"800",color:"#18181b",flexShrink:0}}>{formatUGX(item.lineTotal)}</span>
-                <button onClick={() => removeItem(item.cartKey)} style={{color:"#a1a1aa",background:"none",border:"none",flexShrink:0,padding:"2px"}} className="hover:text-red-500 transition-colors">
-                  <svg width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg>
+                <span className="text-sm text-zinc-200 font-semibold min-w-fit">{formatUGX(item.lineTotal)}</span>
+                <button onClick={() => removeItem(item.cartKey)} className="text-red-400/50 hover:text-red-400 ml-0.5">
+                  <svg width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg>
                 </button>
               </div>
             ))}
           </div>
-
-          {/* Total + Pay */}
-          <div style={{padding:"10px 12px 14px",display:"flex",alignItems:"center",gap:"10px"}}>
-            <div style={{flex:1}}>
-              <p style={{fontSize:"10px",color:"#71717a",textTransform:"uppercase",letterSpacing:"0.08em",fontWeight:"700"}}>Total</p>
-              <p style={{fontSize:"26px",fontWeight:"900",color:"#d97706",lineHeight:"1",fontFamily:"'DM Sans',sans-serif"}}>{formatUGX(cartTotal)}</p>
-              <p style={{fontSize:"11px",color:"#a1a1aa"}}>{cartItemCount} item{cartItemCount !== 1 ? "s" : ""}</p>
+          <div className="px-4 pb-4 pt-3 flex items-center gap-3">
+            <div className="flex-1">
+              <p className="text-xs text-zinc-500 uppercase tracking-wider">Total</p>
+              <p className="text-2xl font-bold text-amber-400" style={{ fontFamily: "'DM Sans', sans-serif" }}>{formatUGX(cartTotal)}</p>
             </div>
-            <button onClick={() => setCart([])} style={{padding:"10px 16px",background:"#f4f4f5",border:"1.5px solid #d4d4d8",borderRadius:"12px",color:"#52525b",fontWeight:"600",fontSize:"13px"}} className="active:scale-95 transition-all">Clear</button>
-            <button onClick={onComplete} style={{padding:"12px 22px",background:"linear-gradient(135deg,#f59e0b,#ea580c)",border:"none",borderRadius:"14px",color:"#fff",fontWeight:"900",fontSize:"17px",boxShadow:"0 6px 18px rgba(245,158,11,0.4)"}} className="active:scale-95 transition-all">Pay →</button>
+            <button onClick={() => setCart([])} className="px-3 py-3 rounded-xl bg-zinc-800 text-zinc-400 font-medium hover:bg-zinc-700 active:scale-95 transition-all text-sm">Clear</button>
+            <button onClick={onComplete} className="px-6 py-3 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 text-zinc-900 font-bold hover:from-amber-400 hover:to-orange-400 active:scale-95 transition-all shadow-lg shadow-amber-500/20 text-lg">Pay →</button>
           </div>
         </div>
       )}
 
-      {showBarcodeScanner && <BarcodeScannerModal onScan={function(code) {
-        setShowBarcodeScanner(false);
-        setBarcodeInput(code);
-        var norm = function(v){ return String(v || "").trim(); };
-        var found = products.find(function(p){ return p.barcode && norm(p.barcode) === norm(code); });
-        if (!found) found = products.find(function(p){ return norm(p.id).toLowerCase() === norm(code).toLowerCase(); });
-        if (found) {
-          handleProductTap(found);
-        } else {
-          playBeep("error");
-          showToast("Barcode " + code + " not found — add it in Stock tab first", "warn");
-        }
-      }} onClose={function(){setShowBarcodeScanner(false);}} />}
+      {showBarcodeScanner && <BarcodeScannerModal onScan={function(code) { setShowBarcodeScanner(false); setBarcodeInput(code); var found = products.find(function(p){return p.barcode && p.barcode === code;}); if(found){playBeep();handleProductTap(found);} else {alert("Scanned: " + code + " — not found in products. Add it in Stock tab.");} }} onClose={function(){setShowBarcodeScanner(false);}} />}
       {weightModal && <WeightEntryModal product={weightModal} onAdd={(w, t) => addWeightProduct(weightModal, w, t)} onClose={() => setWeightModal(null)} />}
       {pieceModal && <PieceEntryModal product={pieceModal} onAdd={(c, t) => addPieceProduct(pieceModal, c, t)} onClose={() => setPieceModal(null)} />}
       {variantModal && <VariantModal product={variantModal} onAdd={(vi, q, t) => addVariantProduct(variantModal, vi, q, t)} onClose={() => setVariantModal(null)} />}
       {showCamera && <CameraScanModal products={products} onProductFound={handleCameraProduct} onClose={() => setShowCamera(false)} />}
-
-      {/* Toast notification */}
-      {toast && (
-        <div className={`fixed bottom-24 left-4 right-4 z-50 px-4 py-3 rounded-2xl shadow-2xl flex items-center gap-3 transition-all ${
-          toast.type === "warn" ? "bg-amber-500/95 text-zinc-900" :
-          toast.type === "error" ? "bg-red-600/95 text-white" :
-          "bg-emerald-600/95 text-white"
-        }`}>
-          <span className="text-xl flex-shrink-0">
-            {toast.type === "warn" ? "⚠️" : toast.type === "error" ? "❌" : "✅"}
-          </span>
-          <p className="text-sm font-semibold flex-1">{toast.msg}</p>
-          <button onClick={() => setToast(null)} className="opacity-70 hover:opacity-100 flex-shrink-0">
-            <svg width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-          </button>
-        </div>
-      )}
     </div>
   );
 }
 
-function ProductFormModal({ initial, onSave, onDelete, onClose, title }) {
-  const today = new Date().toISOString().split("T")[0];
-  const emptyForm = {name:"",brand:"",type:"barcode",category:"General",price:"",cost:"",stock:"",barcode:"",unit:"pc",image:"📦",photo:"",pricePerKg:"",pricePerPiece:"",unitDesc:"",lastPurchaseDate:""};
-  const [fp, setFp] = useState(initial ? {...emptyForm, ...initial, cost: initial.cost || "", lastPurchaseDate: initial.lastPurchaseDate || "", unitDesc: initial.unitDesc || "", photo: initial.photo || ""} : emptyForm);
-  const [confirmDelete, setConfirmDelete] = useState(false);
-  const [dateAutoSet, setDateAutoSet] = useState(false);
-  const photoInputRef = useRef(null);
-
-  const originalStock = initial ? (Number(initial.stock) || 0) : 0;
-
-  const handleStockChange = (val) => {
-    const newStock = Number(val) || 0;
-    const updated = {...fp, stock: val};
-    if (initial && newStock > originalStock) {
-      updated.lastPurchaseDate = today;
-      setDateAutoSet(true);
-    } else if (newStock <= originalStock) {
-      setDateAutoSet(false);
-    }
-    setFp(updated);
-  };
-
-  // Convert selected/captured image file to base64 and store in fp.photo
-  // ── Photo compression ──────────────────────────────────────────
-  // Shrinks ANY photo (even 5MB) down to under 12KB for reliable
-  // storage in Sheets and fast loading. Uses two passes:
-  //   1. Resize to max dimension
-  //   2. Loop down quality until target size is hit
-  const compressPhoto = (dataUrl, targetBytes, maxDim) => {
-    return new Promise((resolve) => {
-      const img = new Image();
-      img.onload = () => {
-        const canvas = document.createElement("canvas");
-
-        // Step 1 — resize so longest side = maxDim
-        const ratio = Math.min(maxDim / img.width, maxDim / img.height, 1);
-        canvas.width  = Math.round(img.width  * ratio);
-        canvas.height = Math.round(img.height * ratio);
-        const ctx = canvas.getContext("2d");
-        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-
-        // Step 2 — reduce JPEG quality until under targetBytes
-        let quality = 0.8;
-        let result  = canvas.toDataURL("image/jpeg", quality);
-
-        while (result.length * 0.75 > targetBytes && quality > 0.05) {
-          quality -= 0.05;
-          result = canvas.toDataURL("image/jpeg", quality);
-        }
-
-        // Step 3 — if still too big, halve the dimensions and retry
-        if (result.length * 0.75 > targetBytes && maxDim > 50) {
-          compressPhoto(dataUrl, targetBytes, Math.round(maxDim * 0.6))
-            .then(resolve);
-          return;
-        }
-
-        resolve(result);
-      };
-      img.src = dataUrl;
-    });
-  };
-
-  const handlePhotoSelect = (e) => {
-    const file = e.target.files && e.target.files[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = async (ev) => {
-      // Target: under 12KB base64 (~9KB binary), max 160px initial dimension
-      const compressed = await compressPhoto(ev.target.result, 12000, 160);
-      const kb = Math.round(compressed.length * 0.75 / 1024);
-      console.log("[photo] compressed to ~" + kb + "KB");
-      setFp(prev => ({...prev, photo: compressed}));
-    };
-    reader.readAsDataURL(file);
-    e.target.value = "";
-  };
-
-  const salePrice = fp.type === "weight" ? Number(fp.pricePerKg) : fp.type === "piece" ? Number(fp.pricePerPiece) : Number(fp.price);
-  const margin = salePrice > 0 && Number(fp.cost) > 0 ? Math.round(((salePrice - Number(fp.cost)) / salePrice) * 100) : null;
-
-  const handleSave = () => {
-    if (!fp.name.trim()) return;
-    const prefix = fp.type === "weight" ? "W" : fp.type === "piece" ? "PC" : "P";
-    const saved = {
-      id: initial ? initial.id : prefix + String(Date.now()).slice(-4),
-      type: fp.type, barcode: fp.barcode || "",
-      name: fp.name, brand: fp.brand || "", category: fp.category || "General",
-      cost: Number(fp.cost) || 0, stock: Number(fp.stock) || 0,
-      unit: fp.type === "weight" ? "kg" : fp.type === "piece" ? "pcs" : "pc",
-      unitDesc: fp.unitDesc || "",
-      lastPurchaseDate: fp.lastPurchaseDate || "",
-      image: fp.image || "📦",
-      photo: fp.photo || "",
-    };
-    if (fp.type === "barcode") saved.price = Number(fp.price) || 0;
-    if (fp.type === "weight") { saved.pricePerKg = Number(fp.pricePerKg) || 0; saved.minWeight = 0.25; saved.weightStep = 0.25; }
-    if (fp.type === "piece") saved.pricePerPiece = Number(fp.pricePerPiece) || 0;
-    if (initial && initial.variants) saved.variants = initial.variants;
-    onSave(saved);
-  };
-
-  const emojis = ["📦","🥤","🍞","🧴","🧼","🪥","🍪","🍺","🥛","🍚","🌾","🥔","🫘","🌽","🥜","🧅","🍅","🥚","🌯","🍩","🫓","🍌","🧈","🫗","🧂","🧹","🧻","🧽","🫙","🛢️"];
-
-  const inp = "w-full bg-zinc-900 border border-zinc-700 rounded-xl px-3 py-2.5 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-amber-500 transition-colors";
-  const lbl = "text-xs font-medium text-zinc-400 mb-1 block";
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-end" onClick={e => { if(e.target === e.currentTarget) onClose(); }}>
-      <div className="w-full bg-zinc-900 border-t border-zinc-700/60 rounded-t-3xl max-h-[90vh] overflow-y-auto">
-        {/* Handle */}
-        <div className="flex justify-center pt-3 pb-1"><div className="w-10 h-1 bg-zinc-600 rounded-full" /></div>
-
-        {/* Header */}
-        <div className="flex items-center justify-between px-5 py-3 border-b border-zinc-800">
-          <h2 className="text-base font-bold text-zinc-100" style={{fontFamily:"'DM Sans',sans-serif"}}>{title}</h2>
-          <button onClick={onClose} className="w-8 h-8 rounded-full bg-zinc-800 flex items-center justify-center text-zinc-400 hover:text-zinc-200">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-          </button>
-        </div>
-
-        <div className="px-5 py-4 space-y-4">
-          {/* ── Product Icon / Photo ── */}
-          <div>
-            <label className={lbl}>Product Photo / Icon</label>
-            {/* Two hidden file inputs — one forces camera, one opens gallery */}
-            <input
-              ref={photoInputRef}
-              type="file"
-              accept="image/*"
-              capture="environment"
-              onChange={handlePhotoSelect}
-              style={{display:"none"}}
-            />
-            <input
-              id="photo-gallery-input"
-              type="file"
-              accept="image/*"
-              onChange={handlePhotoSelect}
-              style={{display:"none"}}
-            />
-
-            <div className="flex gap-3 items-start">
-              {/* Current image preview */}
-              <div className="flex-shrink-0 w-20 h-20 rounded-2xl border-2 border-zinc-700 bg-zinc-800 flex items-center justify-center overflow-hidden relative">
-                {fp.photo
-                  ? <img src={fp.photo} alt="product" style={{width:"100%",height:"100%",objectFit:"cover"}} />
-                  : <span style={{fontSize:"36px"}}>{fp.image}</span>
-                }
-                {fp.photo && (
-                  <button
-                    onClick={() => setFp(prev => ({...prev, photo: ""}))}
-                    className="absolute top-1 right-1 w-5 h-5 rounded-full bg-red-600 flex items-center justify-center"
-                    style={{fontSize:"10px",color:"#fff",border:"none"}}
-                  >✕</button>
-                )}
-              </div>
-
-              {/* Photo action buttons */}
-              <div className="flex-1 space-y-2">
-                <button
-                  onClick={() => photoInputRef.current && photoInputRef.current.click()}
-                  className="w-full flex items-center gap-2 px-3 py-2.5 rounded-xl active:scale-95 transition-all font-semibold text-sm"
-                  style={{background:"#2563eb",color:"#fff",border:"none"}}
-                >
-                  <svg width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z"/><circle cx="12" cy="13" r="4"/></svg>
-                  📷 Take Photo
-                </button>
-                <button
-                  onClick={() => document.getElementById("photo-gallery-input").click()}
-                  className="w-full flex items-center gap-2 px-3 py-2.5 rounded-xl active:scale-95 transition-all font-semibold text-sm"
-                  style={{background:"#18181b",border:"1.5px solid #52525b",color:"#d4d4d8"}}
-                >
-                  <svg width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
-                  🖼 Choose from Gallery / Files
-                </button>
-              </div>
-            </div>
-
-            {/* Emoji fallback — shown below, hidden label if photo is set */}
-            {!fp.photo && (
-              <div className="mt-3">
-                <p className="text-xs text-zinc-600 mb-1.5">Or choose an emoji icon:</p>
-                <div className="flex gap-1 flex-wrap bg-zinc-800/50 rounded-xl p-2">
-                  {emojis.map(em => (
-                    <button key={em} onClick={() => setFp({...fp, image: em})}
-                      className={`w-9 h-9 rounded-lg text-xl flex items-center justify-center transition-all ${fp.image === em ? "bg-amber-500/30 border-2 border-amber-500 scale-110" : "hover:bg-zinc-700"}`}>
-                      {em}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Product Name */}
-          <div>
-            <label className={lbl}>Product Name *</label>
-            <input type="text" value={fp.name} onChange={e => setFp({...fp, name: e.target.value})} placeholder="e.g. Mukwano Laundry Soap" className={inp} />
-          </div>
-
-          {/* Brand */}
-          <div>
-            <label className={lbl}>Brand</label>
-            <input type="text" value={fp.brand} onChange={e => setFp({...fp, brand: e.target.value})} placeholder="e.g. Mukwano, Rwenzori, Nile" className={inp} />
-          </div>
-
-          {/* Type + Category row */}
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className={lbl}>Product Type</label>
-              <select value={fp.type} onChange={e => setFp({...fp, type: e.target.value})} className={inp}>
-                <option value="barcode">📦 Barcoded</option>
-                <option value="weight">⚖️ By Weight</option>
-                <option value="piece">🔢 By Piece</option>
-              </select>
-            </div>
-            <div>
-              <label className={lbl}>Category</label>
-              <input type="text" value={fp.category} onChange={e => setFp({...fp, category: e.target.value})} placeholder="e.g. Soap, Grocery" className={inp} />
-            </div>
-          </div>
-
-          {/* Barcode row */}
-          <div>
-            <label className={lbl}>Barcode Number</label>
-            <div className="flex gap-2">
-              <input type="text" value={fp.barcode} onChange={e => setFp({...fp, barcode: e.target.value})} placeholder="Scan or type barcode" className={inp} />
-              <button type="button" onClick={function(){
-                // Clean up any previous scanner remnants
-                var old = document.getElementById("inv-bc-reader");
-                if (old) old.parentNode && old.parentNode.removeChild(old);
-
-                // Build overlay UI FIRST so the div exists before Html5Qrcode targets it
-                var overlay = document.createElement("div");
-                overlay.style.cssText = "position:fixed;inset:0;z-index:9999;background:#000;display:flex;flex-direction:column;align-items:center;justify-content:center;";
-
-                var scanDiv = document.createElement("div");
-                scanDiv.id = "inv-bc-reader";
-                scanDiv.style.cssText = "width:100%;max-width:400px;";
-
-                var hint = document.createElement("p");
-                hint.textContent = "Point camera at barcode";
-                hint.style.cssText = "color:#a1a1aa;font-size:13px;margin:12px 0 0;text-align:center;";
-
-                var closeBtn = document.createElement("button");
-                closeBtn.textContent = "✕  Cancel";
-                closeBtn.style.cssText = "margin-top:20px;background:#f59e0b;color:#000;border:none;padding:12px 32px;border-radius:12px;font-size:15px;font-weight:bold;cursor:pointer;";
-
-                overlay.appendChild(scanDiv);
-                overlay.appendChild(hint);
-                overlay.appendChild(closeBtn);
-                document.body.appendChild(overlay);
-
-                var sc = null;
-                var stopped = false;
-
-                function cleanup() {
-                  if (stopped) return;
-                  stopped = true;
-                  try { sc && sc.stop().catch(function(){}); } catch(e) {}
-                  try { document.body.removeChild(overlay); } catch(e) {}
-                }
-
-                closeBtn.onclick = cleanup;
-
-                try {
-                  sc = new Html5Qrcode("inv-bc-reader");
-                  sc.start(
-                    { facingMode: "environment" },
-                    { fps: 10, qrbox: { width: 280, height: 150 } },
-                    function(code) {
-                      playBeep("success");
-                      cleanup();
-                      setFp(function(prev){ return Object.assign({}, prev, { barcode: code }); });
-                    },
-                    function() {}
-                  ).catch(function(err) {
-                    cleanup();
-                    alert("Camera error: " + (err && err.message ? err.message : err));
-                  });
-                } catch(e) {
-                  cleanup();
-                  alert("Scanner error: " + (e && e.message ? e.message : "Camera not available. Make sure the app is opened over HTTPS."));
-                }
-              }} className="flex-shrink-0 px-4 bg-cyan-500/20 border border-cyan-500/40 text-cyan-400 rounded-xl font-bold text-sm active:scale-95 flex items-center gap-1.5 whitespace-nowrap">
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M3 7V5a2 2 0 012-2h2M17 3h2a2 2 0 012 2v2M21 17v2a2 2 0 01-2 2h-2M7 21H5a2 2 0 01-2-2v-2"/><line x1="7" y1="12" x2="17" y2="12"/></svg>
-                Scan
-              </button>
-            </div>
-          </div>
-
-          {/* Pricing */}
-          <div className="bg-zinc-800/50 rounded-xl p-4 space-y-3">
-            <p className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Pricing</p>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className={lbl}>
-                  {fp.type === "weight" ? "Sale Price / Kg (UGX)" : fp.type === "piece" ? "Sale Price / Piece (UGX)" : "Sale Price (UGX)"}
-                </label>
-                {fp.type === "barcode" && <input type="number" value={fp.price} onChange={e => setFp({...fp, price: e.target.value})} placeholder="0" className={inp} />}
-                {fp.type === "weight" && <input type="number" value={fp.pricePerKg} onChange={e => setFp({...fp, pricePerKg: e.target.value})} placeholder="0" className={inp} />}
-                {fp.type === "piece" && <input type="number" value={fp.pricePerPiece} onChange={e => setFp({...fp, pricePerPiece: e.target.value})} placeholder="0" className={inp} />}
-              </div>
-              <div>
-                <label className={lbl}>Purchase Price (UGX)</label>
-                <input type="number" value={fp.cost} onChange={e => setFp({...fp, cost: e.target.value})} placeholder="0" className={inp} />
-              </div>
-            </div>
-            {margin !== null && (
-              <div className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium ${margin >= 20 ? "bg-emerald-500/10 text-emerald-400" : margin >= 5 ? "bg-amber-500/10 text-amber-400" : "bg-red-500/10 text-red-400"}`}>
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg>
-                Margin: {margin}% {margin >= 20 ? "✓ Good" : margin >= 5 ? "— Low" : "✗ Very low"}
-              </div>
-            )}
-          </div>
-
-          {/* Stock + Unit Description */}
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className={lbl}>
-                Stock Quantity
-                {initial && <span className="ml-1 text-zinc-600 font-normal">(was {originalStock})</span>}
-              </label>
-              <input
-                type="number"
-                value={fp.stock}
-                onChange={e => handleStockChange(e.target.value)}
-                placeholder="0"
-                className={inp}
-              />
-              {initial && Number(fp.stock) > originalStock && (
-                <p className="text-xs text-emerald-400 mt-1">
-                  +{Number(fp.stock) - originalStock} units added
-                </p>
-              )}
-            </div>
-            <div>
-              <label className={lbl}>Unit Description</label>
-              <input type="text" value={fp.unitDesc} onChange={e => setFp({...fp, unitDesc: e.target.value})} placeholder="e.g. 500g, 500ml, 1kg" className={inp} />
-            </div>
-          </div>
-
-          {/* Last Purchase Date */}
-          <div>
-            <div className="flex items-center justify-between mb-1">
-              <label className={lbl} style={{margin:0}}>Last Purchase Date</label>
-              {dateAutoSet && (
-                <span className="text-xs text-emerald-400 flex items-center gap-1">
-                  <svg width="11" height="11" fill="currentColor" viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
-                  Auto-detected today
-                </span>
-              )}
-            </div>
-            <input
-              type="date"
-              value={fp.lastPurchaseDate}
-              onChange={e => { setFp({...fp, lastPurchaseDate: e.target.value}); setDateAutoSet(false); }}
-              className={inp}
-            />
-          </div>
-
-          {/* Actions */}
-          <div className="flex gap-3 pt-2">
-            <button onClick={onClose} className="flex-1 py-3.5 rounded-xl bg-zinc-800 border border-zinc-700 text-zinc-300 font-medium text-sm active:scale-95 transition-all">
-              Cancel
-            </button>
-            <button onClick={handleSave} disabled={!fp.name.trim()} className="flex-1 py-3.5 rounded-xl bg-amber-500 text-zinc-900 font-bold text-sm active:scale-95 disabled:opacity-40 transition-all shadow-lg shadow-amber-500/20">
-              {initial ? "Save Changes" : "Add Product"}
-            </button>
-          </div>
-
-          {/* Delete — only shown when editing */}
-          {initial && onDelete && !confirmDelete && (
-            <button onClick={() => setConfirmDelete(true)} className="w-full py-3 rounded-xl border border-red-500/30 text-red-400 text-sm font-medium active:scale-95 transition-all flex items-center justify-center gap-2 mb-4">
-              <svg width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/><path d="M10 11v6M14 11v6"/></svg>
-              Delete this product
-            </button>
-          )}
-          {confirmDelete && (
-            <div className="mb-4 bg-red-500/10 border border-red-500/30 rounded-xl p-4">
-              <p className="text-sm text-red-300 font-medium text-center mb-3">Are you sure? This cannot be undone.</p>
-              <div className="flex gap-2">
-                <button onClick={() => setConfirmDelete(false)} className="flex-1 py-2.5 rounded-lg bg-zinc-800 text-zinc-300 text-sm font-medium">Cancel</button>
-                <button onClick={() => onDelete(initial.id)} className="flex-1 py-2.5 rounded-lg bg-red-600 text-white text-sm font-bold">Delete</button>
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ═══════════════════════════════════════════════════════════════
-// Approval Modal — requires Admin or Manager PIN for Cashier actions
-// ═══════════════════════════════════════════════════════════════
-function ApprovalModal({ action, onApproved, onCancel }) {
-  const [pin, setPin] = useState("");
-  const [checking, setChecking] = useState(false);
-  const [error, setError] = useState("");
-  const [shake, setShake] = useState(false);
-
-  const actionLabels = {
-    add:    { label: "Add Product",    icon: "📦", color: "text-blue-400" },
-    edit:   { label: "Edit Product",   icon: "✏️",  color: "text-amber-400" },
-    delete: { label: "Delete Product", icon: "🗑",  color: "text-red-400" },
-  };
-  const info = actionLabels[action] || { label: action, icon: "🔐", color: "text-zinc-400" };
-
-  const handleKey = async (k) => {
-    if (k === "DEL") { setPin(p => p.slice(0, -1)); setError(""); return; }
-    if (k === "OK") {
-      if (pin.length < 4) { setShake(true); setTimeout(() => setShake(false), 500); return; }
-      setChecking(true);
-      setError("");
-
-      // 1. Try API — check if this PIN belongs to Admin or Manager
-      if (api.isConfigured()) {
-        try {
-          const result = await api.post("login", { pin });
-          if (result && result.success && result.user) {
-            const role = (result.user.role || "").toLowerCase();
-            if (role === "admin" || role === "manager") {
-              setChecking(false);
-              onApproved(result.user);
-              return;
-            } else {
-              setError("Only Admin or Manager can approve this.");
-              setPin(""); setShake(true); setTimeout(() => setShake(false), 500);
-              setChecking(false);
-              return;
-            }
-          }
-        } catch(e) { /* fall through to offline check */ }
-      }
-
-      // 2. Offline fallback
-      const adminPins = ["1234"];   // Admin default
-      const managerPins = ["5678"]; // Manager default
-      if (adminPins.includes(pin)) {
-        setChecking(false);
-        onApproved({ id: "admin", name: "Admin", role: "Admin" });
-        return;
-      }
-      if (managerPins.includes(pin)) {
-        setChecking(false);
-        onApproved({ id: "manager", name: "Manager", role: "Manager" });
-        return;
-      }
-
-      setError("Wrong PIN or insufficient role.");
-      setPin(""); setShake(true); setTimeout(() => setShake(false), 500);
-      setChecking(false);
-      return;
-    }
-    if (pin.length < 6) { setPin(p => p + k); setError(""); }
-  };
-
-  return (
-    <div className="fixed inset-0 z-[60] bg-black/80 flex items-center justify-center px-5" onClick={e => { if(e.target === e.currentTarget) onCancel(); }}>
-      <div className="w-full max-w-xs bg-zinc-900 border border-zinc-700 rounded-3xl overflow-hidden shadow-2xl">
-        {/* Header */}
-        <div className="px-6 pt-6 pb-4 text-center border-b border-zinc-800">
-          <div className="w-14 h-14 rounded-2xl bg-zinc-800 border border-zinc-700 flex items-center justify-center text-2xl mx-auto mb-3">🔐</div>
-          <h3 className="text-base font-bold text-zinc-100" style={{fontFamily:"'DM Sans',sans-serif"}}>Approval Required</h3>
-          <p className="text-xs text-zinc-400 mt-1">
-            <span className={info.color}>{info.icon} {info.label}</span>
-            {" "}requires Admin or Manager PIN
-          </p>
-        </div>
-
-        <div className="px-5 py-4">
-          {/* PIN dots */}
-          <div className={`flex justify-center gap-3 mb-4 ${shake ? "animate-bounce" : ""}`}>
-            {[0,1,2,3].map(i => (
-              <div key={i} className={`w-11 h-11 rounded-xl border-2 flex items-center justify-center transition-all ${i < pin.length ? "border-amber-500 bg-amber-500/10" : "border-zinc-700 bg-zinc-800/50"}`}>
-                {i < pin.length && <div className="w-3 h-3 rounded-full bg-amber-400" />}
-              </div>
-            ))}
-          </div>
-
-          {/* Keypad */}
-          <div className="grid grid-cols-3 gap-2">
-            {["1","2","3","4","5","6","7","8","9","DEL","0","OK"].map(k => (
-              <button key={k} onClick={() => handleKey(k)}
-                className={`h-12 rounded-xl font-semibold text-base transition-all active:scale-95 ${
-                  k === "OK"  ? "bg-amber-500 text-zinc-900 shadow-lg shadow-amber-500/20" :
-                  k === "DEL" ? "bg-zinc-800 text-zinc-400" :
-                  "bg-zinc-800 text-zinc-200 border border-zinc-700"
-                }`}>
-                {k === "DEL" ? "⌫" : k === "OK" && checking
-                  ? <span className="inline-block w-4 h-4 border-2 border-zinc-900 border-t-transparent rounded-full animate-spin" />
-                  : k}
-              </button>
-            ))}
-          </div>
-
-          {error && <p className="text-center text-red-400 text-xs mt-3 font-medium">{error}</p>}
-
-          <button onClick={onCancel} className="w-full mt-3 py-2.5 rounded-xl bg-zinc-800 text-zinc-400 text-sm font-medium active:scale-95 transition-all">
-            Cancel
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function InventoryScreen({ products, setProducts, refreshProducts, autoOpenAdd, onAddOpened, user }) {
+function InventoryScreen({ products, setProducts }) {
   const [search, setSearch] = useState("");
   const [filterType, setFilterType] = useState("all");
+  const [sortBy, setSortBy] = useState("name");
+  const [editingId, setEditingId] = useState(null);
+  const [editValue, setEditValue] = useState("");
   const [showAddForm, setShowAddForm] = useState(false);
-  const [editingProduct, setEditingProduct] = useState(null);
-
-  // Approval gate state
-  const isCashier = !user || (user.role || "").toLowerCase() === "cashier";
-  const [pendingAction, setPendingAction] = useState(null); // {type:"add"|"edit"|"delete", payload}
-  const [showApproval, setShowApproval] = useState(false);
-
-  // Called when Cashier taps Add / Edit / Delete — show approval first
-  const requireApproval = (type, payload) => {
-    if (!isCashier) {
-      // Admin or Manager — proceed directly
-      executePendingAction(type, payload);
-    } else {
-      setPendingAction({ type, payload });
-      setShowApproval(true);
-    }
-  };
-
-  const onApprovalGranted = () => {
-    setShowApproval(false);
-    if (pendingAction) {
-      executePendingAction(pendingAction.type, pendingAction.payload);
-      setPendingAction(null);
-    }
-  };
-
-  const onApprovalCancelled = () => {
-    setShowApproval(false);
-    setPendingAction(null);
-  };
-
-  const executePendingAction = (type, payload) => {
-    if (type === "add") {
-      setShowAddForm(true);
-    } else if (type === "edit") {
-      setEditingProduct(payload);
-    } else if (type === "delete") {
-      handleDelete(payload);
-    }
-  };
-
-  useEffect(() => {
-    if (autoOpenAdd) {
-      requireApproval("add", null);
-      if (onAddOpened) onAddOpened();
-    }
-  }, [autoOpenAdd]);
+  const [np, setNp] = useState({name:"",type:"barcode",category:"General",price:"",cost:"",stock:"",barcode:"",unit:"pc",image:"📦",pricePerKg:"",pricePerPiece:""});
 
   const getStock = (p) => p.type === "variant" ? p.variants.reduce((s, v) => s + v.stock, 0) : (p.stock || 0);
   const getPrice = (p) => p.type === "weight" ? p.pricePerKg : p.type === "piece" ? p.pricePerPiece : p.type === "variant" ? (p.variants && p.variants[0] ? p.variants[0].price : 0) : p.price;
 
   const filtered = products
     .filter(p => filterType === "all" || p.type === filterType)
-    .filter(p => {
-      const q = search.toLowerCase();
-      return p.name.toLowerCase().includes(q) || (p.brand && p.brand.toLowerCase().includes(q)) || (p.barcode && p.barcode.includes(q)) || (p.category && p.category.toLowerCase().includes(q));
-    })
-    .sort((a, b) => a.name.localeCompare(b.name));
+    .filter(p => p.name.toLowerCase().includes(search.toLowerCase()))
+    .sort((a, b) => sortBy === "name" ? a.name.localeCompare(b.name) : sortBy === "stock-low" ? getStock(a) - getStock(b) : getPrice(b) - getPrice(a));
 
-  // Helper — uploads base64 photo to Google Drive, returns permanent URL
-  const uploadPhotoToDrive = async (product) => {
-    if (!product.photo || !product.photo.startsWith("data:") || !api.isConfigured()) return product;
-    try {
-      const result = await api.post("uploadPhoto", {
-        base64: product.photo,
-        productId: product.id,
-        deviceId: DEVICE_ID
-      });
-      if (result && result.success && result.photoUrl) {
-        return { ...product, photo: result.photoUrl };
-      }
-    } catch(e) { /* keep base64 as fallback */ }
-    return product;
+  const lowStockCount = products.filter(p => getStock(p) <= 10).length;
+  const totalValue = products.reduce((s, p) => s + getPrice(p) * getStock(p), 0);
+
+  const handleStockSave = (id) => {
+    const val = parseInt(editValue);
+    if (!isNaN(val) && val >= 0 && setProducts) {
+      setProducts(prev => prev.map(p => p.id === id ? {...p, stock: val} : p));
+    }
+    setEditingId(null); setEditValue("");
   };
 
-  const handleAdd = async (saved) => {
-    const norm = normaliseProduct(saved);
-    // Upload photo to Drive so it's permanent (not cache-dependent)
-    const withUrl = await uploadPhotoToDrive(norm);
-    // 1. Update React state immediately
-    if (setProducts) setProducts(prev => [...prev, withUrl]);
+  const handleAddProduct = () => {
+    if (!np.name.trim() || !setProducts) return;
+    const prefix = np.type === "weight" ? "W" : np.type === "piece" ? "PC" : "P";
+    const newP = {
+      id: prefix + String(Date.now()).slice(-4), type: np.type, barcode: np.barcode || "",
+      name: np.name, category: np.category || "General", cost: Number(np.cost) || 0,
+      stock: Number(np.stock) || 0, unit: np.type === "weight" ? "kg" : np.type === "piece" ? "pcs" : "pc",
+      image: np.image || "📦"
+    };
+    if (np.type === "barcode") newP.price = Number(np.price) || 0;
+    if (np.type === "weight") { newP.pricePerKg = Number(np.pricePerKg) || 0; newP.minWeight = 0.25; newP.weightStep = 0.25; }
+    if (np.type === "piece") newP.pricePerPiece = Number(np.pricePerPiece) || 0;
+    setProducts(prev => [...prev, newP]);
+    setNp({name:"",type:"barcode",category:"General",price:"",cost:"",stock:"",barcode:"",unit:"pc",image:"📦",pricePerKg:"",pricePerPiece:""});
     setShowAddForm(false);
-    // 2. Save to IndexedDB (with Drive URL so photo survives cache clears)
-    try { await dbPut("products", withUrl); } catch(e) { console.warn("dbPut failed:", e); }
-    // 3. Push to Google Sheets
-    if (api.isConfigured()) {
-      try {
-        await api.post("addProduct", { ...withUrl, deviceId: DEVICE_ID });
-        await new Promise(r => setTimeout(r, 1500));
-        await refreshProducts();
-      } catch(e) { console.warn("addProduct API failed — saved locally only:", e); }
-    }
   };
 
-  const handleEdit = async (saved) => {
-    // Upload photo to Drive if it's still a local base64 snapshot
-    const withUrl = await uploadPhotoToDrive(normaliseProduct(saved));
-    // 1. Update React state immediately
-    if (setProducts) setProducts(prev => prev.map(p => p.id === withUrl.id ? withUrl : p));
-    setEditingProduct(null);
-    // 2. Update in IndexedDB with permanent Drive URL
-    try { await dbPut("products", withUrl); } catch(e) { console.warn("dbPut failed:", e); }
-    // 3. Push to Google Sheets
-    if (api.isConfigured()) {
-      try {
-        await api.post("updateProduct", { ...withUrl, productId: withUrl.id, deviceId: DEVICE_ID });
-        await new Promise(r => setTimeout(r, 1500));
-        await refreshProducts();
-      } catch(e) { console.warn("updateProduct API failed:", e); }
-    }
-  };
-
-  const handleDelete = async (id) => {
-    // 1. Update React state immediately
-    if (setProducts) setProducts(prev => prev.filter(p => p.id !== id));
-    // 2. Remove from IndexedDB
-    try { await dbDelete("products", id); } catch(e) { console.warn("dbDelete failed:", e); }
-    // 3. Persist to Google Sheets
-    if (api.isConfigured()) {
-      try { await api.post("deleteProduct", { productId: id, deviceId: DEVICE_ID }); }
-      catch(e) { console.warn("deleteProduct API failed:", e); }
-    }
-  };
-
-  const filterOptions = [
-    { id: "all", label: "All Items" },
-    { id: "barcode", label: "Barcoded" },
-    { id: "weight", label: "By Weight" },
-    { id: "piece", label: "By Piece" },
-    { id: "variant", label: "Variants" },
-  ];
+  const emojis = ["📦","🥤","🍞","🧴","🧼","🪥","🍪","🍺","🥛","🍚","🌾","🥔","🫘","🌽","🥜","🧅","🍅","🥚","🌯","🍩","🫓","🍌","🧈","🫗","🧂","🧹"];
 
   return (
-    <div className="flex flex-col h-full bg-zinc-950">
-      {/* Top bar */}
-      <div className="px-4 pt-4 pb-3 border-b border-zinc-800/60">
-        <h2 className="text-lg font-bold text-zinc-100 mb-3" style={{fontFamily:"'DM Sans',sans-serif"}}>Inventory List</h2>
-
-        {/* Search */}
-        <div className="relative mb-3">
-          <svg className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-          <input
-            type="text" value={search} onChange={e => setSearch(e.target.value)}
-            placeholder="Search products..."
-            className="w-full bg-zinc-800/70 border border-zinc-700/50 rounded-xl pl-9 pr-4 py-2.5 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-amber-500/60 transition-colors"
-          />
+    <div className="flex flex-col h-full">
+      <div className="px-4 pt-4 pb-2 grid grid-cols-3 gap-2">
+        <div className="bg-zinc-800/60 rounded-xl p-3 border border-zinc-700/30">
+          <p className="text-xs text-zinc-500">Products</p>
+          <p className="text-xl font-bold text-zinc-100">{products.length}</p>
         </div>
-
-        {/* Add button + filter dropdown */}
-        <div className="flex items-center gap-3">
-          <button onClick={() => requireApproval("add", null)}
-            className="flex items-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-bold text-sm active:scale-95 transition-all shadow-lg shadow-emerald-600/20">
-            <svg width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-            Add
-          </button>
-          <div className="flex-1" />
-          <div className="relative">
-            <select value={filterType} onChange={e => setFilterType(e.target.value)}
-              className="appearance-none bg-zinc-800/70 border border-zinc-700/50 rounded-xl pl-3 pr-8 py-2.5 text-sm text-zinc-300 focus:outline-none focus:border-amber-500/60 cursor-pointer">
-              {filterOptions.map(o => <option key={o.id} value={o.id}>{o.label}</option>)}
-            </select>
-            <svg className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-400 pointer-events-none" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></svg>
-          </div>
+        <div className="bg-zinc-800/60 rounded-xl p-3 border border-zinc-700/30">
+          <p className="text-xs text-zinc-500">Stock Value</p>
+          <p className="text-lg font-bold text-amber-400">{(totalValue / 1000000).toFixed(1)}M</p>
         </div>
-
-        {/* Total count */}
-        <p className="text-sm font-semibold text-zinc-300 mt-3">
-          Total <span className="text-emerald-400">({filtered.length})</span>
-        </p>
+        <div className={`rounded-xl p-3 border ${lowStockCount > 0 ? "bg-red-500/10 border-red-500/20" : "bg-emerald-500/10 border-emerald-500/20"}`}>
+          <p className="text-xs text-zinc-500">Low Stock</p>
+          <p className={`text-xl font-bold ${lowStockCount > 0 ? "text-red-400" : "text-emerald-400"}`}>{lowStockCount}</p>
+        </div>
       </div>
 
-      {/* Product list */}
-      <div className="flex-1 overflow-y-auto px-4 py-3 space-y-2">
-        {filtered.length === 0 ? (
-          <div className="text-center py-16">
-            <span className="text-5xl block mb-3">📦</span>
-            <p className="text-zinc-400 font-medium">No products found</p>
-            <p className="text-zinc-600 text-sm mt-1">
-              {search ? "Try a different search term" : "Tap + Add to create your first product"}
-            </p>
+      <div className="px-4 py-2 flex gap-2">
+        <div className="flex-1"><SearchInput value={search} onChange={setSearch} placeholder="Search inventory..." /></div>
+        <button onClick={() => setShowAddForm(!showAddForm)} className="px-3 bg-amber-500 text-zinc-900 rounded-xl font-bold hover:bg-amber-400 active:scale-95 transition-all text-sm">+ Add</button>
+        <select value={sortBy} onChange={e => setSortBy(e.target.value)} className="bg-zinc-800 border border-zinc-700/50 rounded-xl px-2 py-2 text-xs text-zinc-300 focus:outline-none">
+          <option value="name">A-Z</option><option value="stock-low">Stock ↑</option><option value="price">Price ↓</option>
+        </select>
+      </div>
+
+      {showAddForm && (
+        <div className="mx-4 mb-2 bg-zinc-800/80 border border-amber-500/30 rounded-xl p-4 space-y-3">
+          <h3 className="text-sm font-bold text-amber-400">Add New Product</h3>
+          <div className="grid grid-cols-2 gap-2">
+            <input type="text" value={np.name} onChange={e => setNp({...np, name: e.target.value})} placeholder="Product name" className="col-span-2 bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-amber-500" />
+            <select value={np.type} onChange={e => setNp({...np, type: e.target.value})} className="bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200">
+              <option value="barcode">📦 Barcoded</option><option value="weight">⚖️ By Weight</option><option value="piece">🔢 By Piece</option>
+            </select>
+            <input type="text" value={np.category} onChange={e => setNp({...np, category: e.target.value})} placeholder="Category" className="bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none" />
+            {np.type === "barcode" && <input type="number" value={np.price} onChange={e => setNp({...np, price: e.target.value})} placeholder="Sell Price (UGX)" className="bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none" />}
+            {np.type === "weight" && <input type="number" value={np.pricePerKg} onChange={e => setNp({...np, pricePerKg: e.target.value})} placeholder="Price/Kg (UGX)" className="bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none" />}
+            {np.type === "piece" && <input type="number" value={np.pricePerPiece} onChange={e => setNp({...np, pricePerPiece: e.target.value})} placeholder="Price/Piece (UGX)" className="bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none" />}
+            <input type="number" value={np.cost} onChange={e => setNp({...np, cost: e.target.value})} placeholder="Cost Price" className="bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none" />
+            <input type="number" value={np.stock} onChange={e => setNp({...np, stock: e.target.value})} placeholder="Stock Qty" className="bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none" />
+            <div className="col-span-2 flex gap-2">
+              <input type="text" value={np.barcode} onChange={e => setNp({...np, barcode: e.target.value})} placeholder="Barcode number" className="flex-1 bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none" />
+              <button type="button" onClick={function(){
+                try {
+                  var sc = new Html5Qrcode("inv-barcode-reader");
+                  var div = document.createElement("div"); div.id = "inv-barcode-reader"; div.style.cssText = "position:fixed;inset:0;z-index:9999;background:black;";
+                  var closeBtn = document.createElement("button"); closeBtn.textContent = "✕ Close"; closeBtn.style.cssText = "position:fixed;top:16px;right:16px;z-index:10000;background:#333;color:white;border:none;padding:8px 16px;border-radius:8px;font-size:16px;"; 
+                  closeBtn.onclick = function(){ try{sc.stop();}catch(e){} document.body.removeChild(div); document.body.removeChild(closeBtn); };
+                  document.body.appendChild(div); document.body.appendChild(closeBtn);
+                  sc.start({facingMode:"environment"},{fps:10,qrbox:{width:280,height:150}},function(code){
+                    try{sc.stop();}catch(e){} document.body.removeChild(div); document.body.removeChild(closeBtn);
+                    playBeep(); setNp(function(prev){return Object.assign({},prev,{barcode:code});});
+                  },function(){}).catch(function(e){ document.body.removeChild(div); document.body.removeChild(closeBtn); alert("Camera error"); });
+                }catch(e){alert("Scanner not available");}
+              }} className="px-3 bg-cyan-500 text-white rounded-lg font-bold text-sm active:scale-95 flex items-center gap-1">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 7V5a2 2 0 012-2h2M17 3h2a2 2 0 012 2v2M21 17v2a2 2 0 01-2 2h-2M7 21H5a2 2 0 01-2-2v-2"/><line x1="7" y1="12" x2="17" y2="12"/></svg>
+                Scan
+              </button>
+            </div>
           </div>
-        ) : filtered.map(p => {
+          <div className="flex gap-1 flex-wrap">{emojis.map(em => (
+            <button key={em} onClick={() => setNp({...np, image: em})} className={`w-8 h-8 rounded-lg text-lg flex items-center justify-center ${np.image === em ? "bg-amber-500/30 border border-amber-500" : "bg-zinc-900 hover:bg-zinc-700"}`}>{em}</button>
+          ))}</div>
+          <div className="flex gap-2 pb-2">
+            <button onClick={handleAddProduct} disabled={!np.name.trim()} className="flex-1 py-3 rounded-lg bg-amber-500 text-zinc-900 font-bold text-sm active:scale-95 disabled:opacity-40">Save Product</button>
+            <button onClick={() => setShowAddForm(false)} className="flex-1 py-3 rounded-lg bg-zinc-700 text-zinc-300 font-medium text-sm active:scale-95">Cancel</button>
+          </div>
+        </div>
+      )}
+
+      <div className="px-4 pb-2 flex gap-2 overflow-x-auto">
+        {[{ id: "all", label: "All", icon: "📋" }, { id: "barcode", label: "Barcoded", icon: "📦" }, { id: "weight", label: "By Weight", icon: "⚖️" }, { id: "piece", label: "By Piece", icon: "🔢" }, { id: "variant", label: "Variants", icon: "📐" }].map(t => (
+          <button key={t.id} onClick={() => setFilterType(t.id)}
+            className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all whitespace-nowrap flex items-center gap-1 ${
+              filterType === t.id ? "bg-amber-500/20 text-amber-400 border border-amber-500/30" : "bg-zinc-800/60 text-zinc-500 border border-zinc-700/30 hover:text-zinc-300"
+            }`}><span>{t.icon}</span> {t.label}</button>
+        ))}
+      </div>
+
+      <div className="flex-1 overflow-y-auto px-4 pb-4 space-y-2">
+        {filtered.map(p => {
+          const typeInfo = TYPE_LABELS[p.type];
           const stock = getStock(p);
-          const salePrice = getPrice(p);
-          const stockLow = stock <= 5;
-          const stockWarn = stock <= 15 && stock > 5;
-          const priceLabel = p.type === "weight" ? `Ugx${salePrice?.toLocaleString()}/kg` :
-                             p.type === "piece" ? `Ugx${salePrice?.toLocaleString()}/pc` :
-                             `Ugx${salePrice?.toLocaleString()}`;
-          const unitLabel = p.type === "weight" ? `${stock} kg` : p.type === "piece" ? `${stock} pcs` : `${stock} ${p.unit || "pc"}`;
-
+          const isEditing = editingId === p.id;
           return (
-            <div key={p.id} className="bg-white/5 border border-zinc-700/40 rounded-2xl p-3 flex items-start gap-3">
-              {/* Image box */}
-              <div className="w-16 h-16 flex-shrink-0 bg-zinc-700/50 rounded-xl border border-zinc-600/30 flex items-center justify-center overflow-hidden">
-                {p.photo
-                  ? <img src={p.photo} alt={p.name} style={{width:"100%",height:"100%",objectFit:"cover"}} />
-                  : <span className="text-3xl">{p.image || "📦"}</span>
-                }
-              </div>
-
-              {/* Details */}
-              <div className="flex-1 min-w-0 py-0.5">
-                <p className="text-sm font-bold text-zinc-100 leading-snug">
-                  {p.name}
-                  {p.barcode ? <span className="font-normal text-zinc-400">  ({p.barcode})</span> : ""}
+            <div key={p.id} className="bg-zinc-800/40 rounded-xl border border-zinc-700/30 p-3 flex items-center gap-3">
+              <span className="text-2xl w-9 text-center">{p.image}</span>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2">
+                  <p className="text-sm text-zinc-200 font-medium truncate">{p.name}</p>
+                  <span className={`px-1.5 py-0.5 rounded text-xs font-semibold border ${typeInfo.color}`} style={{ fontSize: "9px" }}>{typeInfo.icon} {typeInfo.label}</span>
+                </div>
+                <p className="text-xs text-zinc-500 mt-0.5">
+                  {p.type === "variant" ? p.variants.map(v => v.label + ": " + v.stock).join(" · ") :
+                   p.type === "weight" ? formatUGX(p.pricePerKg) + "/kg · " + p.category :
+                   p.type === "piece" ? formatUGX(p.pricePerPiece) + "/pc · " + p.category :
+                   formatUGX(p.price) + " · " + p.category}
                 </p>
-                {p.brand && (
-                  <p className="text-xs text-zinc-500 mt-1">Brand: <span className="text-zinc-300">{p.brand}</span></p>
-                )}
-                <p className="text-xs text-zinc-500 mt-0.5">Category: <span className="text-zinc-300">{p.category || "General"}</span></p>
-                <p className="text-xs mt-0.5">
-                  <span className="text-zinc-500">In Stock: </span>
-                  <span className={`font-medium ${stockLow ? "text-red-400" : stockWarn ? "text-amber-400" : "text-zinc-300"}`}>
-                    {stock} {p.unitDesc || (p.type === "weight" ? "kg" : p.type === "piece" ? "pcs" : p.unit || "pc")}
-                    {stockLow ? " ⚠" : ""}
-                  </span>
-                </p>
-                <p className="text-xs text-zinc-500 mt-0.5">Sale Price: <span className="text-amber-400 font-medium">{priceLabel}</span></p>
-                {p.cost > 0 && (
-                  <p className="text-xs text-zinc-500 mt-0.5">Purchase Price: <span className="text-zinc-300">Ugx{p.cost.toLocaleString()}</span></p>
-                )}
-                {p.lastPurchaseDate && (
-                  <p className="text-xs text-zinc-500 mt-0.5">Last Purchase Date: <span className="text-zinc-300">{new Date(p.lastPurchaseDate).toLocaleDateString("en-UG", {day:"2-digit", month:"short", year:"numeric"})}</span></p>
-                )}
               </div>
-
-              {/* Edit button only */}
-              <div className="flex-shrink-0 pt-0.5">
-                <button onClick={() => requireApproval("edit", p)}
-                  className="w-9 h-9 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 flex items-center justify-center active:scale-90 transition-all">
-                  <svg width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+              {isEditing ? (
+                <div className="flex items-center gap-1">
+                  <input type="number" value={editValue} onChange={e => setEditValue(e.target.value)} onKeyDown={e => { if(e.key==="Enter") handleStockSave(p.id); }} autoFocus className="w-16 bg-zinc-700 border border-amber-500/50 rounded-lg px-2 py-1 text-sm text-center text-zinc-100 focus:outline-none" />
+                  <button onClick={() => handleStockSave(p.id)} className="w-7 h-7 rounded-lg bg-amber-500/20 text-amber-400 flex items-center justify-center text-sm font-bold">✓</button>
+                  <button onClick={() => {setEditingId(null);setEditValue("");}} className="w-7 h-7 rounded-lg bg-zinc-700 text-zinc-400 flex items-center justify-center text-sm">✕</button>
+                </div>
+              ) : (
+                <button onClick={() => {setEditingId(p.id);setEditValue(String(stock));}}
+                  className={`px-3 py-1.5 rounded-lg font-bold text-sm border ${stock <= 5 ? "bg-red-500/10 border-red-500/30 text-red-400" : stock <= 15 ? "bg-yellow-500/10 border-yellow-500/30 text-yellow-400" : "bg-zinc-700/50 border-zinc-600/30 text-zinc-300"}`}>
+                  {stock} {p.unit}
                 </button>
-              </div>
+              )}
             </div>
           );
         })}
-      </div>
-
-      {/* Add product modal */}
-      {showAddForm && <ProductFormModal title="Add New Product" onSave={handleAdd} onClose={() => setShowAddForm(false)} />}
-
-      {/* Edit product modal */}
-      {editingProduct && <ProductFormModal title="Edit Product" initial={editingProduct} onSave={handleEdit} onDelete={(id) => { setEditingProduct(null); requireApproval("delete", id); }} onClose={() => setEditingProduct(null)} />}
-
-      {/* Approval modal — shown to Cashier before any stock change */}
-      {showApproval && (
-        <ApprovalModal
-          action={pendingAction ? pendingAction.type : "edit"}
-          onApproved={onApprovalGranted}
-          onCancel={onApprovalCancelled}
-        />
-      )}
-    </div>
-  );
-}
-
-// ═══════════════════════════════════════════════════════════════
-// PURCHASES SCREEN — Record stock received from suppliers
-// ═══════════════════════════════════════════════════════════════
-function PurchasesScreen({ products, setProducts }) {
-  const [purchases, setPurchases] = useState([]);
-  const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({ productId:"", supplier:"", qty:"", costPerUnit:"", invoiceNo:"", date: new Date().toISOString().split("T")[0], note:"" });
-  const [saving, setSaving] = useState(false);
-  const [filter, setFilter] = useState("all");
-
-  useEffect(() => { dbGetAll("purchases").then(setPurchases).catch(() => {}); }, []);
-
-  const selectedProduct = products.find(p => p.id === form.productId);
-  const totalCost = (Number(form.qty) || 0) * (Number(form.costPerUnit) || 0);
-
-  const handleSave = async () => {
-    if (!form.productId || !form.qty || !form.costPerUnit) return;
-    setSaving(true);
-    const purchase = {
-      purchaseId: "PUR" + Date.now(),
-      productId: form.productId,
-      productName: selectedProduct ? selectedProduct.name : "",
-      supplier: form.supplier || "Unknown",
-      qty: Number(form.qty),
-      costPerUnit: Number(form.costPerUnit),
-      totalCost,
-      invoiceNo: form.invoiceNo || "",
-      date: form.date,
-      note: form.note || "",
-      createdAt: new Date().toISOString(),
-    };
-    // Save purchase record
-    await dbPut("purchases", purchase);
-    setPurchases(prev => [purchase, ...prev]);
-    // Update product stock + last purchase date + cost
-    if (setProducts) {
-      setProducts(prev => prev.map(p => {
-        if (p.id !== form.productId) return p;
-        const newStock = (p.stock || 0) + Number(form.qty);
-        const updated = { ...p, stock: newStock, cost: Number(form.costPerUnit), lastPurchaseDate: form.date };
-        dbPut("products", updated);
-        return updated;
-      }));
-    }
-    setForm({ productId:"", supplier:"", qty:"", costPerUnit:"", invoiceNo:"", date: new Date().toISOString().split("T")[0], note:"" });
-    setShowForm(false);
-    setSaving(false);
-  };
-
-  const todayPurchases = purchases.filter(p => p.date === new Date().toISOString().split("T")[0]);
-  const todayTotal = todayPurchases.reduce((s, p) => s + p.totalCost, 0);
-  const inp = "w-full bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-2.5 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-amber-500 transition-colors";
-  const lbl = "text-xs font-medium text-zinc-400 mb-1 block";
-
-  return (
-    <div className="flex flex-col h-full bg-zinc-950">
-      <div className="px-4 pt-4 pb-3 border-b border-zinc-800">
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="text-lg font-bold text-zinc-100" style={{fontFamily:"'DM Sans',sans-serif"}}>Purchases</h2>
-          <button onClick={() => setShowForm(true)} className="flex items-center gap-1.5 px-4 py-2 bg-emerald-600 text-white rounded-xl text-sm font-bold active:scale-95 transition-all">
-            <svg width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-            Record Purchase
-          </button>
-        </div>
-        <div className="grid grid-cols-2 gap-2">
-          <div className="bg-zinc-800/60 rounded-xl p-3 border border-zinc-700/30">
-            <p className="text-xs text-zinc-500">Today's Spend</p>
-            <p className="text-base font-bold text-amber-400">{formatUGX(todayTotal)}</p>
-          </div>
-          <div className="bg-zinc-800/60 rounded-xl p-3 border border-zinc-700/30">
-            <p className="text-xs text-zinc-500">Today's Records</p>
-            <p className="text-base font-bold text-zinc-200">{todayPurchases.length}</p>
-          </div>
-        </div>
-      </div>
-
-      <div className="flex-1 overflow-y-auto px-4 py-3 space-y-2">
-        {purchases.length === 0
-          ? <div className="text-center py-16"><span className="text-5xl block mb-3">📦</span><p className="text-zinc-400">No purchases yet</p><p className="text-zinc-600 text-sm mt-1">Tap "Record Purchase" when stock arrives</p></div>
-          : [...purchases].sort((a,b) => b.createdAt.localeCompare(a.createdAt)).map(p => (
-            <div key={p.purchaseId} className="bg-zinc-800/50 border border-zinc-700/30 rounded-2xl p-4">
-              <div className="flex items-start justify-between mb-1">
-                <div>
-                  <p className="text-sm font-bold text-zinc-100">{p.productName}</p>
-                  <p className="text-xs text-zinc-500 mt-0.5">Supplier: <span className="text-zinc-300">{p.supplier}</span></p>
-                  {p.invoiceNo && <p className="text-xs text-zinc-500">Invoice: <span className="text-zinc-400">{p.invoiceNo}</span></p>}
-                </div>
-                <div className="text-right">
-                  <p className="text-sm font-bold text-amber-400">{formatUGX(p.totalCost)}</p>
-                  <p className="text-xs text-zinc-500">{p.date}</p>
-                </div>
-              </div>
-              <div className="flex gap-3 mt-2 pt-2 border-t border-zinc-700/30">
-                <span className="text-xs text-zinc-500">Qty: <span className="text-zinc-300 font-semibold">{p.qty}</span></span>
-                <span className="text-xs text-zinc-500">@ <span className="text-zinc-300">{formatUGX(p.costPerUnit)}/unit</span></span>
-                {p.note && <span className="text-xs text-zinc-600 italic">{p.note}</span>}
-              </div>
-            </div>
-          ))
-        }
-      </div>
-
-      {showForm && (
-        <div className="fixed inset-0 z-50 flex items-end bg-black/70" onClick={e => { if(e.target===e.currentTarget) setShowForm(false); }}>
-          <div className="w-full bg-zinc-900 rounded-t-3xl max-h-[90vh] overflow-y-auto border-t border-zinc-700">
-            <div className="flex justify-center pt-3 pb-1"><div className="w-10 h-1 bg-zinc-600 rounded-full"/></div>
-            <div className="flex items-center justify-between px-5 py-3 border-b border-zinc-800">
-              <h3 className="text-base font-bold text-zinc-100" style={{fontFamily:"'DM Sans',sans-serif"}}>Record Purchase</h3>
-              <button onClick={() => setShowForm(false)} className="w-8 h-8 rounded-full bg-zinc-800 text-zinc-400 flex items-center justify-center text-sm">✕</button>
-            </div>
-            <div className="px-5 py-4 space-y-4">
-              <div>
-                <label className={lbl}>Product *</label>
-                <select value={form.productId} onChange={e => { const p=products.find(x=>x.id===e.target.value); setForm(f=>({...f, productId:e.target.value, costPerUnit: p?p.cost:""})); }} className={inp}>
-                  <option value="">— Select product —</option>
-                  {[...products].sort((a,b)=>a.name.localeCompare(b.name)).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-                </select>
-                {selectedProduct && <p className="text-xs text-zinc-500 mt-1">Current stock: <span className="text-amber-400">{selectedProduct.stock} {selectedProduct.unit}</span></p>}
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div><label className={lbl}>Quantity Received *</label><input type="number" value={form.qty} onChange={e=>setForm(f=>({...f,qty:e.target.value}))} placeholder="0" className={inp}/></div>
-                <div><label className={lbl}>Cost Per Unit (UGX) *</label><input type="number" value={form.costPerUnit} onChange={e=>setForm(f=>({...f,costPerUnit:e.target.value}))} placeholder="0" className={inp}/></div>
-              </div>
-              {totalCost > 0 && <div className="bg-amber-500/10 border border-amber-500/20 rounded-xl px-4 py-2.5 flex justify-between"><span className="text-sm text-zinc-400">Total Cost</span><span className="text-sm font-bold text-amber-400">{formatUGX(totalCost)}</span></div>}
-              <div className="grid grid-cols-2 gap-3">
-                <div><label className={lbl}>Supplier</label><input type="text" value={form.supplier} onChange={e=>setForm(f=>({...f,supplier:e.target.value}))} placeholder="Supplier name" className={inp}/></div>
-                <div><label className={lbl}>Invoice No.</label><input type="text" value={form.invoiceNo} onChange={e=>setForm(f=>({...f,invoiceNo:e.target.value}))} placeholder="Optional" className={inp}/></div>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div><label className={lbl}>Date</label><input type="date" value={form.date} onChange={e=>setForm(f=>({...f,date:e.target.value}))} className={inp}/></div>
-                <div><label className={lbl}>Note</label><input type="text" value={form.note} onChange={e=>setForm(f=>({...f,note:e.target.value}))} placeholder="Optional" className={inp}/></div>
-              </div>
-              <div className="flex gap-3 pb-4">
-                <button onClick={()=>setShowForm(false)} className="flex-1 py-3.5 rounded-xl bg-zinc-800 border border-zinc-700 text-zinc-300 font-medium text-sm">Cancel</button>
-                <button onClick={handleSave} disabled={!form.productId||!form.qty||!form.costPerUnit||saving} className="flex-1 py-3.5 rounded-xl bg-emerald-600 text-white font-bold text-sm disabled:opacity-40 active:scale-95">
-                  {saving ? "Saving..." : "Save Purchase"}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ═══════════════════════════════════════════════════════════════
-// EXPENSES SCREEN — Track daily business expenses
-// ═══════════════════════════════════════════════════════════════
-function ExpensesScreen() {
-  const CATEGORIES = ["Rent","Electricity","Water","Transport","Salaries","Packaging","Repairs","Airtime","Other"];
-  const [expenses, setExpenses] = useState([]);
-  const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({ category:"Other", description:"", amount:"", date: new Date().toISOString().split("T")[0], paidTo:"" });
-
-  useEffect(() => { dbGetAll("expenses").then(setExpenses).catch(()=>{}); }, []);
-
-  const todayStr = new Date().toISOString().split("T")[0];
-  const todayExpenses = expenses.filter(e => e.date === todayStr);
-  const todayTotal = todayExpenses.reduce((s,e) => s + e.amount, 0);
-  const monthTotal = expenses.filter(e => e.date && e.date.startsWith(todayStr.slice(0,7))).reduce((s,e)=>s+e.amount,0);
-
-  const handleSave = async () => {
-    if (!form.amount) return;
-    const exp = {
-      expenseId: "EXP" + Date.now(),
-      category: form.category,
-      description: form.description || form.category,
-      amount: Number(form.amount),
-      date: form.date,
-      paidTo: form.paidTo || "",
-      createdAt: new Date().toISOString(),
-    };
-    await dbPut("expenses", exp);
-    setExpenses(prev => [exp, ...prev]);
-    setForm({ category:"Other", description:"", amount:"", date: todayStr, paidTo:"" });
-    setShowForm(false);
-  };
-
-  const catColors = { Rent:"text-red-400 bg-red-500/15", Electricity:"text-yellow-400 bg-yellow-500/15", Water:"text-blue-400 bg-blue-500/15", Transport:"text-purple-400 bg-purple-500/15", Salaries:"text-emerald-400 bg-emerald-500/15", Packaging:"text-cyan-400 bg-cyan-500/15", Repairs:"text-orange-400 bg-orange-500/15", Airtime:"text-pink-400 bg-pink-500/15", Other:"text-zinc-400 bg-zinc-700" };
-  const inp = "w-full bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-2.5 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-amber-500 transition-colors";
-  const lbl = "text-xs font-medium text-zinc-400 mb-1 block";
-
-  return (
-    <div className="flex flex-col h-full bg-zinc-950">
-      <div className="px-4 pt-4 pb-3 border-b border-zinc-800">
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="text-lg font-bold text-zinc-100" style={{fontFamily:"'DM Sans',sans-serif"}}>Expenses</h2>
-          <button onClick={() => setShowForm(true)} className="flex items-center gap-1.5 px-4 py-2 bg-red-600 text-white rounded-xl text-sm font-bold active:scale-95 transition-all">
-            <svg width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-            Add Expense
-          </button>
-        </div>
-        <div className="grid grid-cols-2 gap-2">
-          <div className="bg-red-500/10 border border-red-500/20 rounded-xl p-3">
-            <p className="text-xs text-zinc-500">Today's Expenses</p>
-            <p className="text-base font-bold text-red-400">{formatUGX(todayTotal)}</p>
-          </div>
-          <div className="bg-zinc-800/60 border border-zinc-700/30 rounded-xl p-3">
-            <p className="text-xs text-zinc-500">This Month</p>
-            <p className="text-base font-bold text-zinc-200">{formatUGX(monthTotal)}</p>
-          </div>
-        </div>
-      </div>
-
-      <div className="flex-1 overflow-y-auto px-4 py-3 space-y-2">
-        {expenses.length === 0
-          ? <div className="text-center py-16"><span className="text-5xl block mb-3">💸</span><p className="text-zinc-400">No expenses recorded</p></div>
-          : [...expenses].sort((a,b)=>b.createdAt.localeCompare(a.createdAt)).map(exp => (
-            <div key={exp.expenseId} className="bg-zinc-800/50 border border-zinc-700/30 rounded-2xl p-4 flex items-center gap-3">
-              <span className={`text-xs font-bold px-2 py-1 rounded-lg flex-shrink-0 ${catColors[exp.category]||catColors.Other}`}>{exp.category}</span>
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-semibold text-zinc-200 truncate">{exp.description}</p>
-                {exp.paidTo && <p className="text-xs text-zinc-500">Paid to: {exp.paidTo}</p>}
-                <p className="text-xs text-zinc-600">{exp.date}</p>
-              </div>
-              <p className="text-sm font-bold text-red-400 flex-shrink-0">{formatUGX(exp.amount)}</p>
-            </div>
-          ))
-        }
-      </div>
-
-      {showForm && (
-        <div className="fixed inset-0 z-50 flex items-end bg-black/70" onClick={e=>{if(e.target===e.currentTarget)setShowForm(false);}}>
-          <div className="w-full bg-zinc-900 rounded-t-3xl max-h-[85vh] overflow-y-auto border-t border-zinc-700">
-            <div className="flex justify-center pt-3 pb-1"><div className="w-10 h-1 bg-zinc-600 rounded-full"/></div>
-            <div className="flex items-center justify-between px-5 py-3 border-b border-zinc-800">
-              <h3 className="text-base font-bold text-zinc-100">Add Expense</h3>
-              <button onClick={()=>setShowForm(false)} className="w-8 h-8 rounded-full bg-zinc-800 text-zinc-400 flex items-center justify-center">✕</button>
-            </div>
-            <div className="px-5 py-4 space-y-4">
-              <div>
-                <label className={lbl}>Category</label>
-                <div className="flex flex-wrap gap-1.5">
-                  {CATEGORIES.map(c => <button key={c} onClick={()=>setForm(f=>({...f,category:c}))} className={`px-3 py-1.5 rounded-full text-xs font-semibold transition-all ${form.category===c?"bg-amber-500 text-zinc-900":"bg-zinc-800 text-zinc-400 border border-zinc-700"}`}>{c}</button>)}
-                </div>
-              </div>
-              <div><label className={lbl}>Amount (UGX) *</label><input type="number" value={form.amount} onChange={e=>setForm(f=>({...f,amount:e.target.value}))} placeholder="0" className={inp}/></div>
-              <div><label className={lbl}>Description</label><input type="text" value={form.description} onChange={e=>setForm(f=>({...f,description:e.target.value}))} placeholder="What was it for?" className={inp}/></div>
-              <div className="grid grid-cols-2 gap-3">
-                <div><label className={lbl}>Paid To</label><input type="text" value={form.paidTo} onChange={e=>setForm(f=>({...f,paidTo:e.target.value}))} placeholder="Person/Company" className={inp}/></div>
-                <div><label className={lbl}>Date</label><input type="date" value={form.date} onChange={e=>setForm(f=>({...f,date:e.target.value}))} className={inp}/></div>
-              </div>
-              <div className="flex gap-3 pb-4">
-                <button onClick={()=>setShowForm(false)} className="flex-1 py-3.5 rounded-xl bg-zinc-800 border border-zinc-700 text-zinc-300 font-medium text-sm">Cancel</button>
-                <button onClick={handleSave} disabled={!form.amount} className="flex-1 py-3.5 rounded-xl bg-red-600 text-white font-bold text-sm disabled:opacity-40 active:scale-95">Save Expense</button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ═══════════════════════════════════════════════════════════════
-// STOCK ADJUSTMENTS — Handle losses, damage, corrections
-// ═══════════════════════════════════════════════════════════════
-function StockAdjustmentsScreen({ products, setProducts }) {
-  const REASONS = ["Damaged","Expired","Lost/Missing","Correction","Returned to Supplier","Promotional Use","Other"];
-  const [adjustments, setAdjustments] = useState([]);
-  const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({ productId:"", type:"reduce", qty:"", reason:"Damaged", note:"", date: new Date().toISOString().split("T")[0] });
-
-  useEffect(() => { dbGetAll("adjustments").then(setAdjustments).catch(()=>{}); }, []);
-
-  const selectedProduct = products.find(p => p.id === form.productId);
-  const inp = "w-full bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-2.5 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-amber-500 transition-colors";
-  const lbl = "text-xs font-medium text-zinc-400 mb-1 block";
-
-  const handleSave = async () => {
-    if (!form.productId || !form.qty) return;
-    const qty = Number(form.qty);
-    const adj = {
-      adjustId: "ADJ" + Date.now(),
-      productId: form.productId,
-      productName: selectedProduct ? selectedProduct.name : "",
-      type: form.type,
-      qty,
-      reason: form.reason,
-      note: form.note,
-      date: form.date,
-      createdAt: new Date().toISOString(),
-    };
-    await dbPut("adjustments", adj);
-    setAdjustments(prev => [adj, ...prev]);
-    // Update stock
-    if (setProducts && selectedProduct) {
-      setProducts(prev => prev.map(p => {
-        if (p.id !== form.productId) return p;
-        const newStock = form.type === "reduce"
-          ? Math.max(0, (p.stock||0) - qty)
-          : (p.stock||0) + qty;
-        const updated = { ...p, stock: newStock };
-        dbPut("products", updated);
-        return updated;
-      }));
-    }
-    setForm({ productId:"", type:"reduce", qty:"", reason:"Damaged", note:"", date: new Date().toISOString().split("T")[0] });
-    setShowForm(false);
-  };
-
-  return (
-    <div className="flex flex-col h-full bg-zinc-950">
-      <div className="px-4 pt-4 pb-3 border-b border-zinc-800 flex items-center justify-between">
-        <h2 className="text-lg font-bold text-zinc-100" style={{fontFamily:"'DM Sans',sans-serif"}}>Stock Adjustments</h2>
-        <button onClick={()=>setShowForm(true)} className="flex items-center gap-1.5 px-4 py-2 bg-orange-600 text-white rounded-xl text-sm font-bold active:scale-95 transition-all">
-          <svg width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-          New Adjustment
-        </button>
-      </div>
-      <div className="flex-1 overflow-y-auto px-4 py-3 space-y-2">
-        {adjustments.length === 0
-          ? <div className="text-center py-16"><span className="text-5xl block mb-3">📋</span><p className="text-zinc-400">No adjustments recorded</p><p className="text-zinc-600 text-sm mt-1">Record damaged or lost stock here</p></div>
-          : [...adjustments].sort((a,b)=>b.createdAt.localeCompare(a.createdAt)).map(adj => (
-            <div key={adj.adjustId} className="bg-zinc-800/50 border border-zinc-700/30 rounded-2xl p-4">
-              <div className="flex items-start justify-between">
-                <div>
-                  <p className="text-sm font-bold text-zinc-100">{adj.productName}</p>
-                  <p className="text-xs text-zinc-500 mt-0.5">{adj.reason}{adj.note ? ` — ${adj.note}` : ""}</p>
-                  <p className="text-xs text-zinc-600">{adj.date}</p>
-                </div>
-                <span className={`text-sm font-black ${adj.type==="reduce"?"text-red-400":"text-emerald-400"}`}>
-                  {adj.type==="reduce"?"-":"+"}  {adj.qty}
-                </span>
-              </div>
-            </div>
-          ))
-        }
-      </div>
-
-      {showForm && (
-        <div className="fixed inset-0 z-50 flex items-end bg-black/70" onClick={e=>{if(e.target===e.currentTarget)setShowForm(false);}}>
-          <div className="w-full bg-zinc-900 rounded-t-3xl max-h-[90vh] overflow-y-auto border-t border-zinc-700">
-            <div className="flex justify-center pt-3 pb-1"><div className="w-10 h-1 bg-zinc-600 rounded-full"/></div>
-            <div className="flex items-center justify-between px-5 py-3 border-b border-zinc-800">
-              <h3 className="text-base font-bold text-zinc-100">Stock Adjustment</h3>
-              <button onClick={()=>setShowForm(false)} className="w-8 h-8 rounded-full bg-zinc-800 text-zinc-400 flex items-center justify-center">✕</button>
-            </div>
-            <div className="px-5 py-4 space-y-4">
-              {/* Type toggle */}
-              <div className="grid grid-cols-2 gap-2">
-                <button onClick={()=>setForm(f=>({...f,type:"reduce"}))} className={`py-2.5 rounded-xl font-bold text-sm transition-all ${form.type==="reduce"?"bg-red-600 text-white":"bg-zinc-800 border border-zinc-700 text-zinc-400"}`}>− Reduce Stock</button>
-                <button onClick={()=>setForm(f=>({...f,type:"add"}))} className={`py-2.5 rounded-xl font-bold text-sm transition-all ${form.type==="add"?"bg-emerald-600 text-white":"bg-zinc-800 border border-zinc-700 text-zinc-400"}`}>+ Add Stock</button>
-              </div>
-              <div>
-                <label className={lbl}>Product *</label>
-                <select value={form.productId} onChange={e=>setForm(f=>({...f,productId:e.target.value}))} className={inp}>
-                  <option value="">— Select product —</option>
-                  {[...products].sort((a,b)=>a.name.localeCompare(b.name)).map(p=><option key={p.id} value={p.id}>{p.name} (stock: {p.stock})</option>)}
-                </select>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div><label className={lbl}>Quantity *</label><input type="number" value={form.qty} onChange={e=>setForm(f=>({...f,qty:e.target.value}))} placeholder="0" className={inp}/></div>
-                <div><label className={lbl}>Date</label><input type="date" value={form.date} onChange={e=>setForm(f=>({...f,date:e.target.value}))} className={inp}/></div>
-              </div>
-              <div>
-                <label className={lbl}>Reason</label>
-                <div className="flex flex-wrap gap-1.5">
-                  {REASONS.map(r=><button key={r} onClick={()=>setForm(f=>({...f,reason:r}))} className={`px-2.5 py-1 rounded-lg text-xs font-semibold ${form.reason===r?"bg-orange-500 text-white":"bg-zinc-800 text-zinc-400 border border-zinc-700"}`}>{r}</button>)}
-                </div>
-              </div>
-              <div><label className={lbl}>Note (optional)</label><input type="text" value={form.note} onChange={e=>setForm(f=>({...f,note:e.target.value}))} placeholder="Additional details" className={inp}/></div>
-              <div className="flex gap-3 pb-4">
-                <button onClick={()=>setShowForm(false)} className="flex-1 py-3.5 rounded-xl bg-zinc-800 border border-zinc-700 text-zinc-300 font-medium text-sm">Cancel</button>
-                <button onClick={handleSave} disabled={!form.productId||!form.qty} className="flex-1 py-3.5 rounded-xl bg-orange-600 text-white font-bold text-sm disabled:opacity-40 active:scale-95">Save Adjustment</button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ═══════════════════════════════════════════════════════════════
-// CUSTOMERS SCREEN — Credit & customer tracking
-// ═══════════════════════════════════════════════════════════════
-function CustomersScreen() {
-  const [customers, setCustomers] = useState([]);
-  const [showForm, setShowForm] = useState(false);
-  const [showCredit, setShowCredit] = useState(null);
-  const [form, setForm] = useState({ name:"", phone:"", note:"" });
-  const [creditForm, setCreditForm] = useState({ amount:"", description:"", type:"credit", date: new Date().toISOString().split("T")[0] });
-
-  useEffect(() => { dbGetAll("customers").then(setCustomers).catch(()=>{}); }, []);
-
-  const inp = "w-full bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-2.5 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-amber-500 transition-colors";
-  const lbl = "text-xs font-medium text-zinc-400 mb-1 block";
-  const totalCreditOwed = customers.reduce((s,c) => s + (c.balance||0), 0);
-
-  const handleAddCustomer = async () => {
-    if (!form.name.trim()) return;
-    const cust = { customerId:"CUST"+Date.now(), name:form.name, phone:form.phone, note:form.note, balance:0, transactions:[], createdAt:new Date().toISOString() };
-    await dbPut("customers", cust);
-    setCustomers(prev=>[...prev, cust]);
-    setForm({ name:"", phone:"", note:"" });
-    setShowForm(false);
-  };
-
-  const handleAddCredit = async () => {
-    if (!showCredit || !creditForm.amount) return;
-    const amount = creditForm.type==="credit" ? Number(creditForm.amount) : -Number(creditForm.amount);
-    const updated = {
-      ...showCredit,
-      balance: (showCredit.balance||0) + amount,
-      transactions: [...(showCredit.transactions||[]), { amount, description:creditForm.description||creditForm.type, date:creditForm.date, type:creditForm.type, at:new Date().toISOString() }]
-    };
-    await dbPut("customers", updated);
-    setCustomers(prev=>prev.map(c=>c.customerId===updated.customerId?updated:c));
-    setShowCredit(updated);
-    setCreditForm({ amount:"", description:"", type:"credit", date:new Date().toISOString().split("T")[0] });
-  };
-
-  return (
-    <div className="flex flex-col h-full bg-zinc-950">
-      <div className="px-4 pt-4 pb-3 border-b border-zinc-800">
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="text-lg font-bold text-zinc-100" style={{fontFamily:"'DM Sans',sans-serif"}}>Customers</h2>
-          <button onClick={()=>setShowForm(true)} className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 text-white rounded-xl text-sm font-bold active:scale-95 transition-all">
-            <svg width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-            Add Customer
-          </button>
-        </div>
-        {totalCreditOwed > 0 && (
-          <div className="bg-orange-500/10 border border-orange-500/20 rounded-xl px-4 py-2.5 flex justify-between">
-            <span className="text-xs text-zinc-400">Total Credit Owed</span>
-            <span className="text-sm font-bold text-orange-400">{formatUGX(totalCreditOwed)}</span>
-          </div>
-        )}
-      </div>
-      <div className="flex-1 overflow-y-auto px-4 py-3 space-y-2">
-        {customers.length === 0
-          ? <div className="text-center py-16"><span className="text-5xl block mb-3">👤</span><p className="text-zinc-400">No customers yet</p><p className="text-zinc-600 text-sm mt-1">Add customers to track credit</p></div>
-          : customers.map(c => (
-            <button key={c.customerId} onClick={()=>setShowCredit(c)} className="w-full bg-zinc-800/50 border border-zinc-700/30 rounded-2xl p-4 flex items-center gap-3 text-left active:scale-98 transition-all">
-              <div className="w-10 h-10 rounded-full bg-blue-600/20 border border-blue-600/30 flex items-center justify-center flex-shrink-0">
-                <span className="text-base font-bold text-blue-400">{c.name[0].toUpperCase()}</span>
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-bold text-zinc-100">{c.name}</p>
-                {c.phone && <p className="text-xs text-zinc-500">{c.phone}</p>}
-                <p className="text-xs text-zinc-600">{(c.transactions||[]).length} transaction{(c.transactions||[]).length!==1?"s":""}</p>
-              </div>
-              <div className="text-right flex-shrink-0">
-                <p className={`text-sm font-bold ${(c.balance||0)>0?"text-orange-400":(c.balance||0)<0?"text-emerald-400":"text-zinc-500"}`}>
-                  {(c.balance||0)===0?"Clear":(c.balance||0)>0?`Owes ${formatUGX(c.balance)}`:`Credit ${formatUGX(Math.abs(c.balance))}`}
-                </p>
-              </div>
-            </button>
-          ))
-        }
-      </div>
-
-      {/* Add customer form */}
-      {showForm && (
-        <div className="fixed inset-0 z-50 flex items-end bg-black/70" onClick={e=>{if(e.target===e.currentTarget)setShowForm(false);}}>
-          <div className="w-full bg-zinc-900 rounded-t-3xl border-t border-zinc-700">
-            <div className="flex justify-center pt-3 pb-1"><div className="w-10 h-1 bg-zinc-600 rounded-full"/></div>
-            <div className="flex items-center justify-between px-5 py-3 border-b border-zinc-800">
-              <h3 className="text-base font-bold text-zinc-100">Add Customer</h3>
-              <button onClick={()=>setShowForm(false)} className="w-8 h-8 rounded-full bg-zinc-800 text-zinc-400 flex items-center justify-center">✕</button>
-            </div>
-            <div className="px-5 py-4 space-y-3">
-              <div><label className={lbl}>Name *</label><input type="text" value={form.name} onChange={e=>setForm(f=>({...f,name:e.target.value}))} placeholder="Customer name" className={inp}/></div>
-              <div><label className={lbl}>Phone</label><input type="tel" value={form.phone} onChange={e=>setForm(f=>({...f,phone:e.target.value}))} placeholder="e.g. 0701 234 567" className={inp}/></div>
-              <div><label className={lbl}>Note</label><input type="text" value={form.note} onChange={e=>setForm(f=>({...f,note:e.target.value}))} placeholder="Optional" className={inp}/></div>
-              <div className="flex gap-3 pb-4">
-                <button onClick={()=>setShowForm(false)} className="flex-1 py-3.5 rounded-xl bg-zinc-800 border border-zinc-700 text-zinc-300 font-medium text-sm">Cancel</button>
-                <button onClick={handleAddCustomer} disabled={!form.name.trim()} className="flex-1 py-3.5 rounded-xl bg-blue-600 text-white font-bold text-sm disabled:opacity-40 active:scale-95">Add Customer</button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Customer credit detail */}
-      {showCredit && (
-        <div className="fixed inset-0 z-50 flex items-end bg-black/70">
-          <div className="w-full bg-zinc-900 rounded-t-3xl max-h-[90vh] overflow-y-auto border-t border-zinc-700">
-            <div className="flex justify-center pt-3 pb-1"><div className="w-10 h-1 bg-zinc-600 rounded-full"/></div>
-            <div className="flex items-center justify-between px-5 py-3 border-b border-zinc-800">
-              <div>
-                <h3 className="text-base font-bold text-zinc-100">{showCredit.name}</h3>
-                {showCredit.phone && <p className="text-xs text-zinc-500">{showCredit.phone}</p>}
-              </div>
-              <button onClick={()=>setShowCredit(null)} className="w-8 h-8 rounded-full bg-zinc-800 text-zinc-400 flex items-center justify-center">✕</button>
-            </div>
-            <div className="px-5 py-4 space-y-4">
-              {/* Balance */}
-              <div className={`rounded-xl p-4 text-center ${(showCredit.balance||0)>0?"bg-orange-500/10 border border-orange-500/20":(showCredit.balance||0)<0?"bg-emerald-500/10 border border-emerald-500/20":"bg-zinc-800 border border-zinc-700"}`}>
-                <p className="text-xs text-zinc-500 uppercase tracking-wider">Balance</p>
-                <p className={`text-2xl font-black mt-1 ${(showCredit.balance||0)>0?"text-orange-400":(showCredit.balance||0)<0?"text-emerald-400":"text-zinc-400"}`}>
-                  {(showCredit.balance||0)===0?"All Clear":(showCredit.balance||0)>0?`Owes ${formatUGX(showCredit.balance)}`:`Overpaid ${formatUGX(Math.abs(showCredit.balance))}`}
-                </p>
-              </div>
-              {/* Add transaction */}
-              <div className="bg-zinc-800/50 border border-zinc-700/30 rounded-xl p-4 space-y-3">
-                <p className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Record Transaction</p>
-                <div className="grid grid-cols-2 gap-2">
-                  <button onClick={()=>setCreditForm(f=>({...f,type:"credit"}))} className={`py-2 rounded-xl text-sm font-bold ${creditForm.type==="credit"?"bg-orange-500 text-white":"bg-zinc-700 text-zinc-400"}`}>+ Credit (owes)</button>
-                  <button onClick={()=>setCreditForm(f=>({...f,type:"payment"}))} className={`py-2 rounded-xl text-sm font-bold ${creditForm.type==="payment"?"bg-emerald-600 text-white":"bg-zinc-700 text-zinc-400"}`}>− Payment (paid)</button>
-                </div>
-                <input type="number" value={creditForm.amount} onChange={e=>setCreditForm(f=>({...f,amount:e.target.value}))} placeholder="Amount (UGX)" className="w-full bg-zinc-900 border border-zinc-700 rounded-xl px-3 py-2.5 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-amber-500"/>
-                <input type="text" value={creditForm.description} onChange={e=>setCreditForm(f=>({...f,description:e.target.value}))} placeholder="Description (optional)" className="w-full bg-zinc-900 border border-zinc-700 rounded-xl px-3 py-2.5 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-amber-500"/>
-                <button onClick={handleAddCredit} disabled={!creditForm.amount} className="w-full py-3 rounded-xl bg-blue-600 text-white font-bold text-sm disabled:opacity-40 active:scale-95">Save</button>
-              </div>
-              {/* Transaction history */}
-              {(showCredit.transactions||[]).length > 0 && (
-                <div className="space-y-2">
-                  <p className="text-xs font-semibold text-zinc-500 uppercase">History</p>
-                  {[...(showCredit.transactions||[])].reverse().map((t,i) => (
-                    <div key={i} className="flex justify-between items-center py-2 border-b border-zinc-800">
-                      <div><p className="text-xs text-zinc-300">{t.description}</p><p className="text-xs text-zinc-600">{t.date}</p></div>
-                      <span className={`text-sm font-bold ${t.amount>0?"text-orange-400":"text-emerald-400"}`}>{t.amount>0?"+":""}{formatUGX(t.amount)}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ═══════════════════════════════════════════════════════════════
-// REPORTS SCREEN — Business intelligence & summaries
-// ═══════════════════════════════════════════════════════════════
-function ReportsScreen({ sales, products }) {
-  const [period, setPeriod] = useState("today");
-  const [expenses, setExpenses] = useState([]);
-  const [purchases, setPurchases] = useState([]);
-
-  useEffect(() => {
-    dbGetAll("expenses").then(setExpenses).catch(()=>{});
-    dbGetAll("purchases").then(setPurchases).catch(()=>{});
-  }, []);
-
-  const today = new Date();
-  const todayStr = today.toISOString().split("T")[0];
-  const weekStart = new Date(today); weekStart.setDate(today.getDate() - today.getDay());
-  const monthStr = todayStr.slice(0,7);
-
-  const filterByPeriod = (arr, dateField) => {
-    if (period === "today")   return arr.filter(x => (x[dateField]||"").startsWith(todayStr));
-    if (period === "week")    return arr.filter(x => new Date(x[dateField]||"") >= weekStart);
-    if (period === "month")   return arr.filter(x => (x[dateField]||"").startsWith(monthStr));
-    return arr;
-  };
-
-  const periodSales     = filterByPeriod(sales, "dateTime");
-  const periodExpenses  = filterByPeriod(expenses, "date");
-  const periodPurchases = filterByPeriod(purchases, "date");
-
-  const revenue  = periodSales.reduce((s,x) => s+x.total, 0);
-  const cogs     = periodSales.reduce((s,sale) => s + sale.items.reduce((a,i) => a + ((i.cost||0)*i.qty), 0), 0);
-  const grossProfit = revenue - cogs;
-  const totalExpenses = periodExpenses.reduce((s,x) => s+x.amount, 0);
-  const netProfit = grossProfit - totalExpenses;
-  const totalPurchases = periodPurchases.reduce((s,x) => s+x.totalCost, 0);
-  const cashSales = periodSales.filter(s=>s.method==="cash").reduce((s,x)=>s+x.total,0);
-  const momoSales = periodSales.filter(s=>s.method==="momo").reduce((s,x)=>s+x.total,0);
-
-  // Top selling products
-  const productSales = {};
-  periodSales.forEach(sale => sale.items.forEach(item => {
-    if (!productSales[item.name]) productSales[item.name] = { name:item.name, image:item.image, revenue:0, qty:0 };
-    productSales[item.name].revenue += item.lineTotal;
-    productSales[item.name].qty += item.qty||1;
-  }));
-  const topProducts = Object.values(productSales).sort((a,b)=>b.revenue-a.revenue).slice(0,5);
-
-  // Low stock
-  const lowStock = products.filter(p => {
-    const s = p.type==="variant" ? (p.variants||[]).reduce((a,v)=>a+v.stock,0) : (p.stock||0);
-    return s <= 10 && s > 0;
-  });
-  const outOfStock = products.filter(p => {
-    const s = p.type==="variant" ? (p.variants||[]).reduce((a,v)=>a+v.stock,0) : (p.stock||0);
-    return s === 0;
-  });
-
-  const row = (label, value, color="text-zinc-200") => (
-    <div className="flex justify-between items-center py-2.5 border-b border-zinc-800/60">
-      <span className="text-sm text-zinc-400">{label}</span>
-      <span className={`text-sm font-bold ${color}`}>{value}</span>
-    </div>
-  );
-
-  return (
-    <div className="flex flex-col h-full bg-zinc-950">
-      <div className="px-4 pt-4 pb-3 border-b border-zinc-800">
-        <h2 className="text-lg font-bold text-zinc-100 mb-3" style={{fontFamily:"'DM Sans',sans-serif"}}>Reports</h2>
-        <div className="flex gap-1.5">
-          {["today","week","month"].map(p => (
-            <button key={p} onClick={()=>setPeriod(p)} className={`flex-1 py-2 rounded-xl text-xs font-bold transition-all ${period===p?"bg-amber-500 text-zinc-900":"bg-zinc-800 text-zinc-400 border border-zinc-700"}`}>
-              {p==="today"?"Today":p==="week"?"This Week":"This Month"}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <div className="flex-1 overflow-y-auto px-4 py-3 space-y-4 pb-6">
-        {/* P&L Summary */}
-        <div className="bg-zinc-800/50 border border-zinc-700/30 rounded-2xl p-4">
-          <p className="text-xs font-bold text-zinc-400 uppercase tracking-wider mb-2">Profit & Loss</p>
-          {row("Revenue", formatUGX(revenue), "text-amber-400")}
-          {row("Cost of Goods Sold", formatUGX(cogs), "text-zinc-400")}
-          {row("Gross Profit", formatUGX(grossProfit), grossProfit>=0?"text-emerald-400":"text-red-400")}
-          {row("Expenses", formatUGX(totalExpenses), "text-red-400")}
-          <div className="flex justify-between items-center pt-2.5 mt-1">
-            <span className="text-sm font-bold text-zinc-300">Net Profit</span>
-            <span className={`text-lg font-black ${netProfit>=0?"text-emerald-400":"text-red-400"}`}>{formatUGX(netProfit)}</span>
-          </div>
-        </div>
-
-        {/* Sales breakdown */}
-        <div className="bg-zinc-800/50 border border-zinc-700/30 rounded-2xl p-4">
-          <p className="text-xs font-bold text-zinc-400 uppercase tracking-wider mb-2">Sales</p>
-          {row("Transactions", periodSales.length.toString())}
-          {row("Average Sale", periodSales.length>0?formatUGX(Math.round(revenue/periodSales.length)):"—")}
-          {row("💵 Cash", formatUGX(cashSales), "text-emerald-400")}
-          {row("📱 MoMo", formatUGX(momoSales), "text-blue-400")}
-          {row("📦 Purchases Paid", formatUGX(totalPurchases), "text-orange-400")}
-        </div>
-
-        {/* Top products */}
-        {topProducts.length > 0 && (
-          <div className="bg-zinc-800/50 border border-zinc-700/30 rounded-2xl p-4">
-            <p className="text-xs font-bold text-zinc-400 uppercase tracking-wider mb-3">Top Selling Products</p>
-            {topProducts.map((p,i) => (
-              <div key={p.name} className="flex items-center gap-3 py-2 border-b border-zinc-800/40 last:border-0">
-                <span className="text-zinc-500 text-xs w-4">{i+1}</span>
-                <span className="text-base">{p.image}</span>
-                <span className="flex-1 text-sm text-zinc-300 truncate">{p.name}</span>
-                <span className="text-sm font-bold text-amber-400">{formatUGX(p.revenue)}</span>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* Stock health */}
-        <div className="bg-zinc-800/50 border border-zinc-700/30 rounded-2xl p-4">
-          <p className="text-xs font-bold text-zinc-400 uppercase tracking-wider mb-2">Stock Health</p>
-          {row("Total Products", products.length.toString())}
-          {row("Low Stock (≤10)", lowStock.length.toString(), lowStock.length>0?"text-amber-400":"text-emerald-400")}
-          {row("Out of Stock", outOfStock.length.toString(), outOfStock.length>0?"text-red-400":"text-emerald-400")}
-          {outOfStock.length > 0 && (
-            <div className="mt-2 pt-2 border-t border-zinc-800">
-              <p className="text-xs text-zinc-500 mb-1">Out of stock:</p>
-              {outOfStock.map(p => <p key={p.id} className="text-xs text-red-400">• {p.name}</p>)}
-            </div>
-          )}
-        </div>
       </div>
     </div>
   );
@@ -2915,49 +1437,15 @@ function LoginScreen({ onLogin }) {
   const [pin, setPin] = useState("");
   const [shake, setShake] = useState(false);
   const [user, setUser] = useState("Cashier");
-  const [checking, setChecking] = useState(false);
-  const [error, setError] = useState("");
 
-  const handleKey = async (k) => {
-    if (k === "DEL") { setPin(p => p.slice(0, -1)); setError(""); return; }
+  const handleKey = (k) => {
+    if (k === "DEL") return setPin(p => p.slice(0, -1));
     if (k === "OK") {
-      if (pin.length < 4) { setShake(true); setTimeout(() => setShake(false), 500); return; }
-      setChecking(true);
-      setError("");
-
-      // ── 1. Try API login (background) ───────────────────────────
-      if (api.isConfigured()) {
-        try {
-          const result = await api.post("login", { username: user, pin });
-          if (result && result.success && result.user) {
-            setChecking(false);
-            onLogin(result.user);
-            return;
-          }
-          // If API returned success:false, fall through to offline check
-          // (API may have column issues or PIN format mismatch — offline is the safety net)
-        } catch (e) { /* network error — fall through */ }
-      }
-
-      // ── 2. Offline fallback (always runs if API didn't succeed) ──
-      // Matches PIN against known defaults AND the selected role
-      const offlineMap = { Admin: ["1234"], Manager: ["5678"], Cashier: ["0000", "0"] };
-      const validPins = offlineMap[user] || [];
-      if (validPins.includes(pin) || validPins.includes(pin.replace(/^0+/, "") || "0")) {
-        setChecking(false);
-        onLogin({ id: user.toLowerCase(), name: user, role: user });
-        return;
-      }
-
-      // ── 3. Both failed ────────────────────────────────────────────
-      setError("Wrong PIN. Try again.");
-      setPin("");
-      setShake(true);
-      setTimeout(() => setShake(false), 500);
-      setChecking(false);
+      if (pin.length >= 4) onLogin({ name: user, role: user.toLowerCase() });
+      else { setShake(true); setTimeout(() => setShake(false), 500); }
       return;
     }
-    if (pin.length < 6) { setPin(p => p + k); setError(""); }
+    if (pin.length < 6) setPin(p => p + k);
   };
 
   return (
@@ -2982,629 +1470,12 @@ function LoginScreen({ onLogin }) {
         </div>
         <div className="grid grid-cols-3 gap-3">
           {["1","2","3","4","5","6","7","8","9","DEL","0","OK"].map(k => (
-            <button key={k} onClick={() => handleKey(k)}
-              className={`h-14 rounded-xl font-semibold text-lg transition-all active:scale-95 ${k === "OK" ? "bg-amber-500 text-zinc-900 hover:bg-amber-400 shadow-lg shadow-amber-500/20" : k === "DEL" ? "bg-zinc-800 text-zinc-400 hover:bg-zinc-700" : "bg-zinc-900 text-zinc-200 hover:bg-zinc-800 border border-zinc-800"}`}>
-              {k === "OK" && checking
-                ? <span className="inline-block w-5 h-5 border-2 border-zinc-900 border-t-transparent rounded-full animate-spin" />
-                : k === "DEL" ? "⌫" : k}
+            <button key={k} onClick={() => handleKey(k)} className={`h-14 rounded-xl font-semibold text-lg transition-all active:scale-95 ${k === "OK" ? "bg-amber-500 text-zinc-900 hover:bg-amber-400 shadow-lg shadow-amber-500/20" : k === "DEL" ? "bg-zinc-800 text-zinc-400 hover:bg-zinc-700" : "bg-zinc-900 text-zinc-200 hover:bg-zinc-800 border border-zinc-800"}`}>
+              {k === "DEL" ? "⌫" : k}
             </button>
           ))}
         </div>
-        {error && <p className="text-center text-red-400 text-sm mt-4 font-medium">{error}</p>}
-        {checking && !error && <p className="text-center text-amber-400 text-xs mt-4">Checking...</p>}
-        <p className="text-center text-zinc-600 text-xs mt-3">{api.isConfigured() ? "PIN validated against your Google Sheet" : "Offline mode — using default PINs"}</p>
-      </div>
-    </div>
-  );
-}
-
-// ═══════════════════════════════════════════════════════════════
-// Dashboard Screen
-// ═══════════════════════════════════════════════════════════════
-function DashboardScreen({ sales, products, user, onNavigate }) {
-  const today = new Date();
-  const greeting = today.getHours() < 12 ? "Good morning" : today.getHours() < 17 ? "Good afternoon" : "Good evening";
-
-  // Sales metrics
-  const todayTotal = sales.reduce((s, sale) => s + sale.total, 0);
-  const todayProfit = sales.reduce((s, sale) => s + sale.items.reduce((p, i) => p + ((i.unitPrice - (i.cost || 0)) * i.qty), 0), 0);
-  const todayTxCount = sales.length;
-  const cashSales = sales.filter(s => s.method === "cash").reduce((sum, s) => sum + s.total, 0);
-  const momoSales = sales.filter(s => s.method === "momo").reduce((sum, s) => sum + s.total, 0);
-
-  // Stock metrics
-  const getStock = (p) => p.type === "variant" ? p.variants.reduce((s, v) => s + v.stock, 0) : (p.stock || 0);
-  const lowStockItems = products.filter(p => getStock(p) <= 10 && getStock(p) > 0);
-  const outOfStockItems = products.filter(p => getStock(p) === 0);
-  const totalProducts = products.length;
-
-  const tiles = [
-    {
-      id: "new-sale",
-      label: "New Sale",
-      sub: todayTxCount > 0 ? `${todayTxCount} sale${todayTxCount !== 1 ? "s" : ""} today` : "Start selling",
-      icon: (
-        <svg width="28" height="28" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24">
-          <path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/>
-          <path d="M16 10a4 4 0 01-8 0"/>
-        </svg>
-      ),
-      color: "from-amber-500 to-orange-500",
-      shadow: "shadow-amber-500/20",
-      textColor: "text-amber-50",
-      subColor: "text-amber-100/70",
-      full: true,
-      metric: todayTotal > 0 ? formatUGX(todayTotal) : null,
-      metricLabel: todayTotal > 0 ? "Today's Revenue" : null,
-      tab: "pos",
-    },
-    {
-      id: "add-product",
-      label: "Add Product",
-      sub: `${totalProducts} products`,
-      icon: (
-        <svg width="24" height="24" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24">
-          <path d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/>
-          <circle cx="18" cy="18" r="4" fill="currentColor" fillOpacity="0.15"/><line x1="18" y1="16" x2="18" y2="20"/><line x1="16" y1="18" x2="20" y2="18"/>
-        </svg>
-      ),
-      color: "from-blue-600 to-indigo-600",
-      shadow: "shadow-blue-500/20",
-      textColor: "text-blue-50",
-      subColor: "text-blue-100/70",
-      tab: "inventory-add",
-    },
-    {
-      id: "sales-summary",
-      label: "Sales Summary",
-      sub: todayTxCount > 0 ? `Profit: ${formatUGX(todayProfit)}` : "No sales yet",
-      icon: (
-        <svg width="24" height="24" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24">
-          <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
-        </svg>
-      ),
-      color: "from-emerald-600 to-teal-600",
-      shadow: "shadow-emerald-500/20",
-      textColor: "text-emerald-50",
-      subColor: "text-emerald-100/70",
-      tab: "history",
-    },
-    {
-      id: "purchases",
-      label: "Purchases",
-      sub: "Stock purchases log",
-      icon: (
-        <svg width="24" height="24" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24">
-          <path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/>
-          <polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/>
-        </svg>
-      ),
-      color: "from-violet-600 to-purple-600",
-      shadow: "shadow-violet-500/20",
-      textColor: "text-violet-50",
-      subColor: "text-violet-100/70",
-      tab: "purchases",
-    },
-    {
-      id: "stock-overview",
-      label: "Stock Overview",
-      sub: outOfStockItems.length > 0 ? `⚠ ${outOfStockItems.length} out of stock` : lowStockItems.length > 0 ? `${lowStockItems.length} low stock` : "Stock healthy",
-      icon: (
-        <svg width="24" height="24" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24">
-          <rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/>
-          <polyline points="7 10 10 13 13 9 16 11"/>
-        </svg>
-      ),
-      color: "from-cyan-600 to-sky-600",
-      shadow: "shadow-cyan-500/20",
-      textColor: "text-cyan-50",
-      subColor: outOfStockItems.length > 0 ? "text-red-200" : lowStockItems.length > 0 ? "text-amber-200" : "text-cyan-100/70",
-      tab: "inventory",
-    },
-  ];
-
-  const fullTile = tiles.find(t => t.full);
-  const halfTiles = tiles.filter(t => !t.full);
-
-  return (
-    <div className="flex flex-col h-full overflow-y-auto">
-      {/* Greeting */}
-      <div className="px-4 pt-4 pb-2">
-        <p className="text-xs text-zinc-500">{greeting},</p>
-        <h2 className="text-xl font-bold text-zinc-100" style={{ fontFamily: "'DM Sans', sans-serif" }}>
-          {user && user.name ? user.name : "Welcome"} 👋
-        </h2>
-        <p className="text-xs text-zinc-600 mt-0.5">
-          {today.toLocaleDateString("en-UG", { weekday: "long", day: "numeric", month: "long" })}
-        </p>
-      </div>
-
-      {/* Quick stats strip */}
-      {todayTotal > 0 && (
-        <div className="mx-4 mt-2 mb-1 bg-zinc-800/40 border border-zinc-700/30 rounded-xl px-4 py-3 flex gap-4 overflow-x-auto">
-          <div className="flex-shrink-0">
-            <p className="text-xs text-zinc-500">Revenue</p>
-            <p className="text-sm font-bold text-amber-400">{formatUGX(todayTotal)}</p>
-          </div>
-          <div className="w-px bg-zinc-700/50 flex-shrink-0" />
-          <div className="flex-shrink-0">
-            <p className="text-xs text-zinc-500">Profit</p>
-            <p className="text-sm font-bold text-emerald-400">{formatUGX(todayProfit)}</p>
-          </div>
-          <div className="w-px bg-zinc-700/50 flex-shrink-0" />
-          <div className="flex-shrink-0">
-            <p className="text-xs text-zinc-500">Cash</p>
-            <p className="text-sm font-bold text-zinc-200">{formatUGX(cashSales)}</p>
-          </div>
-          <div className="w-px bg-zinc-700/50 flex-shrink-0" />
-          <div className="flex-shrink-0">
-            <p className="text-xs text-zinc-500">MoMo</p>
-            <p className="text-sm font-bold text-blue-400">{formatUGX(momoSales)}</p>
-          </div>
-        </div>
-      )}
-
-      {/* Tiles */}
-      <div className="px-4 pt-3 pb-6 space-y-3">
-        {/* New Sale — full width */}
-        <button
-          onClick={() => onNavigate(fullTile.tab)}
-          className={`w-full bg-gradient-to-br ${fullTile.color} rounded-2xl p-5 flex items-center justify-between shadow-lg ${fullTile.shadow} active:scale-98 transition-all`}
-        >
-          <div className="flex items-center gap-4">
-            <div className="w-12 h-12 rounded-xl bg-white/15 flex items-center justify-center flex-shrink-0">
-              <span className={fullTile.textColor}>{fullTile.icon}</span>
-            </div>
-            <div className="text-left">
-              <p className={`text-lg font-bold ${fullTile.textColor}`} style={{ fontFamily: "'DM Sans', sans-serif" }}>{fullTile.label}</p>
-              <p className={`text-sm ${fullTile.subColor}`}>{fullTile.sub}</p>
-            </div>
-          </div>
-          {fullTile.metric && (
-            <div className="text-right flex-shrink-0">
-              <p className={`text-xl font-bold ${fullTile.textColor}`}>{fullTile.metric}</p>
-              <p className={`text-xs ${fullTile.subColor}`}>{fullTile.metricLabel}</p>
-            </div>
-          )}
-        </button>
-
-        {/* 2×2 grid */}
-        <div className="grid grid-cols-2 gap-3">
-          {halfTiles.map(tile => (
-            <button
-              key={tile.id}
-              onClick={() => onNavigate(tile.tab)}
-              className={`bg-gradient-to-br ${tile.color} rounded-2xl p-4 flex flex-col gap-3 shadow-lg ${tile.shadow} active:scale-95 transition-all text-left`}
-            >
-              <div className="w-10 h-10 rounded-xl bg-white/15 flex items-center justify-center">
-                <span className={tile.textColor}>{tile.icon}</span>
-              </div>
-              <div>
-                <p className={`text-sm font-bold ${tile.textColor}`} style={{ fontFamily: "'DM Sans', sans-serif" }}>{tile.label}</p>
-                <p className={`text-xs mt-0.5 ${tile.subColor}`}>{tile.sub}</p>
-              </div>
-            </button>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ═══════════════════════════════════════════════════════════════
-// Side Drawer Navigation
-// ═══════════════════════════════════════════════════════════════
-function SideDrawer({ open, onClose, user, activeTab, onNavigate, onLogout, online, pendingCount, syncing, source, onSync }) {
-  const [expanded, setExpanded] = useState({ items: false, inventory: false, reports: false });
-  const toggle = (k) => setExpanded(p => ({...p, [k]: !p[k]}));
-
-  const go = (id) => { if (id === "settings-drawer") onNavigate("settings"); else onNavigate(id); onClose(); };
-  const active = (id) => activeTab === id || (id === "settings-drawer" && activeTab === "settings");
-
-  const avatarBg = user && user.role === "Admin" ? "#16a34a" : user && user.role === "Manager" ? "#2563eb" : "#0891b2";
-
-  const Row = ({ id, label, icon, sub }) => {
-    const on = active(id);
-    return (
-      <button onClick={() => go(id)} style={{
-        width:"100%", display:"flex", alignItems:"center",
-        gap:"16px", padding: sub ? "10px 20px 10px 52px" : "12px 20px",
-        background: on ? "#f0fdf4" : "none", border:"none",
-        borderRadius:"10px", cursor:"pointer", boxSizing:"border-box",
-        margin:"1px 0",
-      }}>
-        <span style={{color: on ? "#16a34a" : "#4b5563", flexShrink:0, display:"flex"}}>{icon}</span>
-        <span style={{fontSize:"15px", fontWeight: on ? "700" : "400", color: on ? "#16a34a" : "#111827", textAlign:"left", lineHeight:"1"}}>{label}</span>
-      </button>
-    );
-  };
-
-  const Group = ({ gk, label, icon }) => (
-    <button onClick={() => toggle(gk)} style={{
-      width:"100%", display:"flex", alignItems:"center", gap:"16px",
-      padding:"12px 20px", background:"none", border:"none",
-      borderRadius:"10px", cursor:"pointer", boxSizing:"border-box", margin:"1px 0",
-    }}>
-      <span style={{color:"#4b5563", flexShrink:0, display:"flex"}}>{icon}</span>
-      <span style={{fontSize:"15px", fontWeight:"500", color:"#111827", flex:1, textAlign:"left"}}>{label}</span>
-      <svg width="13" height="13" fill="none" stroke="#9ca3af" strokeWidth="2.5" viewBox="0 0 24 24">
-        {expanded[gk] ? <polyline points="18 15 12 9 6 15"/> : <polyline points="6 9 12 15 18 9"/>}
-      </svg>
-    </button>
-  );
-
-  const Divider = () => <div style={{height:"1px", background:"#f3f4f6", margin:"4px 16px"}} />;
-
-  const I = (d) => <svg width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24">{d}</svg>;
-  const IS = (d) => <svg width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24">{d}</svg>;
-
-  return (
-    <>
-      {/* Backdrop */}
-      <div onClick={onClose} style={{
-        position:"fixed", inset:0, zIndex:40,
-        background:"rgba(0,0,0,0.5)",
-        opacity: open ? 1 : 0,
-        pointerEvents: open ? "auto" : "none",
-        transition:"opacity 0.25s",
-      }} />
-
-      {/* Panel — pure white, no Tailwind */}
-      <div style={{
-        position:"fixed", top:0, left:0, height:"100%", zIndex:50,
-        width:"285px", backgroundColor:"#ffffff",
-        display:"flex", flexDirection:"column",
-        boxShadow:"4px 0 24px rgba(0,0,0,0.18)",
-        transform: open ? "translateX(0)" : "translateX(-100%)",
-        transition:"transform 0.28s cubic-bezier(0.4,0,0.2,1)",
-        borderRight:"1px solid #f3f4f6",
-      }}>
-
-        {/* User header */}
-        <div style={{padding:"52px 20px 16px", borderBottom:"1px solid #f3f4f6", backgroundColor:"#ffffff"}}>
-          <div style={{display:"flex", alignItems:"center", gap:"12px"}}>
-            <div style={{width:"46px", height:"46px", borderRadius:"50%", background:avatarBg, display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0}}>
-              <svg width="24" height="24" fill="white" viewBox="0 0 24 24"><path d="M12 12c2.7 0 4.8-2.1 4.8-4.8S14.7 2.4 12 2.4 7.2 4.5 7.2 7.2 9.3 12 12 12zm0 2.4c-3.2 0-9.6 1.6-9.6 4.8v2.4h19.2v-2.4c0-3.2-6.4-4.8-9.6-4.8z"/></svg>
-            </div>
-            <div>
-              <p style={{margin:0, fontSize:"16px", fontWeight:"700", color:"#111827"}}>{user && user.name ? user.name : "User"}</p>
-              <p style={{margin:"2px 0 0", fontSize:"13px", color:"#6b7280"}}>{user && user.role ? user.role : "Cashier"}</p>
-            </div>
-          </div>
-          <div style={{marginTop:"12px", display:"flex", alignItems:"center", gap:"8px", padding:"6px 10px", background:"#f9fafb", borderRadius:"8px", border:"1px solid #f3f4f6"}}>
-            <span style={{width:"8px", height:"8px", borderRadius:"50%", background: online ? "#22c55e" : "#ef4444", flexShrink:0}} />
-            <span style={{fontSize:"12px", color:"#9ca3af", flex:1}}>{online ? "Online" : "Offline"} • {source === "api" ? "Live" : source === "cache" ? "Cached" : "Demo"}</span>
-            {pendingCount > 0 && <span style={{fontSize:"11px", fontWeight:"700", color:"#d97706", background:"#fef9c3", padding:"2px 7px", borderRadius:"999px"}}>{pendingCount} pending</span>}
-          </div>
-        </div>
-
-        {/* Nav items */}
-        <div style={{flex:1, overflowY:"auto", padding:"8px", backgroundColor:"#ffffff"}}>
-
-          <Row id="dashboard"       label="Dashboard" icon={I(<><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></>)} />
-          <Row id="pos"             label="Bill"      icon={I(<><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></>)} />
-          <Row id="customers"       label="Customers" icon={I(<><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/></>)} />
-          <Row id="settings-drawer" label="Settings"  icon={I(<><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09a1.65 1.65 0 00-1-1.51 1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></>)} />
-
-          <Divider />
-
-          <Group gk="items" label="Items" icon={I(<><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></>)} />
-          {expanded.items && <>
-            <Row id="history"  label="Sales & Bills" sub icon={IS(<><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></>)} />
-            <Row id="expenses" label="Expenses"      sub icon={IS(<><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></>)} />
-          </>}
-
-          <Divider />
-
-          <Group gk="inventory" label="Inventory" icon={I(<><path d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/></>)} />
-          {expanded.inventory && <>
-            <Row id="inventory"   label="Inventory List"        sub icon={IS(<><path d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/></>)} />
-            <Row id="purchases"   label="Purchases / Stock In"  sub icon={IS(<><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></>)} />
-            <Row id="adjustments" label="Inventory Logs"        sub icon={IS(<><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/><circle cx="12" cy="12" r="9"/></>)} />
-          </>}
-
-          <Divider />
-
-          <Group gk="reports" label="Reports" icon={I(<><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></>)} />
-          {expanded.reports && <>
-            <Row id="reports" label="Sales Report" sub icon={IS(<><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></>)} />
-          </>}
-
-          <Divider />
-
-          {/* Sync */}
-          <button onClick={() => { onSync(); onClose(); }} disabled={!online} style={{
-            width:"100%", display:"flex", alignItems:"center", gap:"16px",
-            padding:"12px 20px", background:"none", border:"none",
-            borderRadius:"10px", cursor: online ? "pointer" : "default",
-            opacity: online ? 1 : 0.35, boxSizing:"border-box", margin:"1px 0",
-          }}>
-            <svg width="20" height="20" fill="none" stroke="#4b5563" strokeWidth="1.8" viewBox="0 0 24 24" style={{flexShrink:0, animation: syncing ? "spin 1s linear infinite" : "none"}}><path d="M21 12a9 9 0 11-6.219-8.56"/></svg>
-            <span style={{fontSize:"15px", fontWeight:"400", color:"#111827"}}>Sync Data</span>
-            {pendingCount > 0 && <span style={{marginLeft:"auto", fontSize:"11px", fontWeight:"700", color:"#d97706", background:"#fef9c3", padding:"2px 8px", borderRadius:"999px"}}>{pendingCount}</span>}
-          </button>
-        </div>
-
-        {/* Logout */}
-        <div style={{padding:"12px 16px 20px", borderTop:"1px solid #f3f4f6", backgroundColor:"#ffffff"}}>
-          <button onClick={() => { onLogout(); onClose(); }} style={{
-            width:"100%", padding:"14px", backgroundColor:"#ef4444",
-            border:"none", borderRadius:"14px", color:"#fff",
-            fontWeight:"700", fontSize:"15px", display:"flex",
-            alignItems:"center", justifyContent:"center",
-            gap:"8px", cursor:"pointer", boxSizing:"border-box",
-          }}>
-            <svg width="17" height="17" fill="none" stroke="white" strokeWidth="2.2" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
-            Logout
-          </button>
-        </div>
-      </div>
-    </>
-  );
-}
-
-// ═══════════════════════════════════════════════════════════════
-// Settings + Data Recovery Panel
-// ═══════════════════════════════════════════════════════════════
-function SettingsPanel({ online, source, pendingCount, products, setProducts, setSales, setPendingCount, refreshProducts, onSync, onClose }) {
-  const [recovering, setRecovering] = useState(false);
-  const [recoverLog, setRecoverLog] = useState([]);
-  const [localStats, setLocalStats] = useState(null);
-  const [recovered, setRecovered] = useState(false);
-
-  // Load local stats on open
-  useEffect(() => {
-    const load = async () => {
-      const pending = await dbGetAll("pendingSales");
-      const cached  = await dbGetAll("products");
-      setLocalStats({ pendingSales: pending.length, cachedProducts: cached.length });
-    };
-    load();
-  }, []);
-
-  const log = (msg, type) => setRecoverLog(prev => [...prev, { msg, type: type || "info", t: new Date().toLocaleTimeString() }]);
-
-  const handleRecoverAll = async () => {
-    if (!online || !api.isConfigured()) {
-      log("You must be online to recover data", "error");
-      return;
-    }
-    setRecovering(true);
-    setRecoverLog([]);
-    let totalSynced = 0;
-    let totalFailed = 0;
-
-    // ── 1. Recover pending sales ────────────────────────────────
-    log("Reading pending sales from device...");
-    const pendingSales = await dbGetAll("pendingSales");
-    if (pendingSales.length === 0) {
-      log("No pending sales found locally", "ok");
-    } else {
-      log(`Found ${pendingSales.length} pending sale(s) — pushing to Sheets...`);
-      try {
-        const result = await api.post("syncSales", { sales: pendingSales });
-        if (result && result.success) {
-          for (const r of (result.results || [])) {
-            if (r.success && r.offlineId) {
-              await dbDelete("pendingSales", r.offlineId);
-              totalSynced++;
-            } else {
-              totalFailed++;
-            }
-          }
-          log(`✓ Sales synced: ${result.synced || 0}, failed: ${result.failed || 0}`, result.synced > 0 ? "ok" : "warn");
-          const remaining = await dbGetAll("pendingSales");
-          setPendingCount(remaining.length);
-        } else {
-          log("Sales sync returned no result — check API URL", "error");
-        }
-      } catch (e) {
-        log("Sales sync error: " + e.message, "error");
-      }
-    }
-
-    // ── 2. Recover locally-added products not in Sheets ─────────
-    log("Checking for local-only products...");
-    try {
-      const apiResult = await api.get("getProducts");
-      const apiProducts = (apiResult && apiResult.success) ? apiResult.products : [];
-      const cachedProducts = await dbGetAll("products");
-
-      // A product needs pushing if its ID is not in Sheets at all
-      // Skip only the known MOCK/demo IDs that ship with the app
-      const DEMO_IDS = new Set([
-        "P001","P002","P003","P004","P005",
-        "W001","W002","W003","W004","W005","W006","W007","W008",
-        "PC01","PC02","PC03","PC04",
-        "V001","V002","V003"
-      ]);
-
-      // Build live set of IDs already in Sheets
-      let sheetsIds = new Set(apiProducts.map(p => p.id));
-
-      const localOnly = cachedProducts.filter(p =>
-        p.id &&
-        !sheetsIds.has(p.id) &&   // not already in Sheets
-        !DEMO_IDS.has(p.id) &&    // not a demo product
-        p.name                    // must have a name
-      );
-
-      if (localOnly.length === 0) {
-        log(`All ${cachedProducts.length} local product(s) already in Sheets ✓`, "ok");
-      } else {
-        log(`Found ${localOnly.length} product(s) not yet in Sheets — warming up server...`);
-
-        // Warm up Apps Script with a GET ping first so it's not cold when we POST
-        try {
-          await api.get("warmup");
-          log("Server is awake — pushing products now...", "ok");
-        } catch(e) { log("Warmup failed, trying anyway...", "warn"); }
-
-        let prodSynced = 0;
-        for (const p of localOnly) {
-          // ── Re-check live against Sheets right before each push ──
-          // This prevents duplicates when multiple devices run recovery simultaneously
-          try {
-            const liveCheck = await api.get("getProducts");
-            if (liveCheck && liveCheck.success) {
-              const liveIds = new Set(liveCheck.products.map(x => x.id));
-              if (liveIds.has(p.id)) {
-                log(`  ↷ ${p.name} already in Sheets (added by another device) — skipping`, "ok");
-                prodSynced++;
-                continue;
-              }
-            }
-          } catch(e) { /* live check failed, proceed with push anyway */ }
-
-          log(`  Pushing: ${p.name}...`);
-          let r = null;
-          for (let attempt = 1; attempt <= 3; attempt++) {
-            try {
-              r = await api.post("addProduct", { ...p, deviceId: DEVICE_ID });
-              if (r && r.success) break;
-              if (r && r.error) {
-                log(`  ✗ ${p.name} — server error: ${r.error}`, "error");
-                break;
-              }
-              if (attempt < 3) {
-                log(`  Retry ${attempt + 1}/3 for ${p.name}...`);
-                await new Promise(res => setTimeout(res, 3000));
-              }
-            } catch (e) {
-              if (attempt < 3) await new Promise(res => setTimeout(res, 2000));
-            }
-          }
-          if (r && r.success) {
-            prodSynced++;
-            log(`  ✓ ${p.name} saved (ID: ${r.productId || p.id})`, "ok");
-          } else if (!r) {
-            log(`  ✗ ${p.name} — no response after 3 attempts. Check Apps Script deployment.`, "error");
-          }
-        }
-        log(`Products pushed: ${prodSynced} / ${localOnly.length}`, prodSynced === localOnly.length ? "ok" : "warn");
-      }
-    } catch (e) {
-      log("Product check error: " + e.message, "error");
-    }
-
-    // ── 3. Pull fresh data from Sheets ──────────────────────────
-    log("Pulling fresh data from Sheets...");
-    try {
-      await refreshProducts();
-      log("✓ Products refreshed from Sheets", "ok");
-    } catch (e) { log("Refresh failed: " + e.message, "error"); }
-
-    const stats = await dbGetAll("pendingSales");
-    setLocalStats(prev => ({ ...prev, pendingSales: stats.length }));
-    setRecovered(true);
-    setRecovering(false);
-    log("─── Recovery complete ───", "ok");
-  };
-
-  const typeColor = t => t === "ok" ? "text-emerald-400" : t === "error" ? "text-red-400" : t === "warn" ? "text-amber-400" : "text-zinc-400";
-
-  return (
-    <div className="fixed inset-0 z-50 bg-black/60 flex items-end" onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className="w-full bg-zinc-900 border-t border-zinc-700/60 rounded-t-3xl max-h-[85vh] flex flex-col">
-        {/* Handle */}
-        <div className="flex justify-center pt-3 pb-1 flex-shrink-0"><div className="w-10 h-1 bg-zinc-700 rounded-full" /></div>
-
-        {/* Header */}
-        <div className="flex items-center justify-between px-5 py-3 border-b border-zinc-800 flex-shrink-0">
-          <h2 className="text-base font-bold text-zinc-100" style={{fontFamily:"'DM Sans',sans-serif"}}>Settings & Data Recovery</h2>
-          <button onClick={onClose} className="w-8 h-8 rounded-full bg-zinc-800 flex items-center justify-center text-zinc-400">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-          </button>
-        </div>
-
-        <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
-          {/* Status cards */}
-          <div className="grid grid-cols-2 gap-3">
-            <div className="bg-zinc-800/60 rounded-xl p-3 border border-zinc-700/30">
-              <p className="text-xs text-zinc-500">Connection</p>
-              <p className={`text-sm font-bold mt-0.5 ${online ? "text-emerald-400" : "text-red-400"}`}>{online ? "🟢 Online" : "🔴 Offline"}</p>
-            </div>
-            <div className="bg-zinc-800/60 rounded-xl p-3 border border-zinc-700/30">
-              <p className="text-xs text-zinc-500">Data Source</p>
-              <p className={`text-sm font-bold mt-0.5 ${source === "api" ? "text-emerald-400" : source === "cache" ? "text-blue-400" : "text-zinc-400"}`}>
-                {source === "api" ? "Live" : source === "cache" ? "Cached" : "Demo"}
-              </p>
-            </div>
-            <div className={`rounded-xl p-3 border ${pendingCount > 0 ? "bg-amber-500/10 border-amber-500/30" : "bg-zinc-800/60 border-zinc-700/30"}`}>
-              <p className="text-xs text-zinc-500">Pending Sales</p>
-              <p className={`text-sm font-bold mt-0.5 ${pendingCount > 0 ? "text-amber-400" : "text-emerald-400"}`}>
-                {pendingCount > 0 ? `${pendingCount} unsynced` : "All synced ✓"}
-              </p>
-            </div>
-            <div className="bg-zinc-800/60 rounded-xl p-3 border border-zinc-700/30">
-              <p className="text-xs text-zinc-500">Local Products</p>
-              <p className="text-sm font-bold text-zinc-300 mt-0.5">{localStats ? localStats.cachedProducts : "—"} cached</p>
-            </div>
-          </div>
-
-          {/* API URL */}
-          <div className="bg-zinc-800/50 rounded-xl p-3">
-            <p className="text-xs text-zinc-500 mb-1">API URL</p>
-            <p className="text-xs text-zinc-400 font-mono break-all leading-relaxed">
-              {API_URL || "⚠ Not configured — set API_URL in index.html"}
-            </p>
-          </div>
-
-          {/* Recovery section */}
-          <div className="bg-amber-500/8 border border-amber-500/25 rounded-xl p-4 space-y-3">
-            <div>
-              <p className="text-sm font-bold text-amber-400">🔄 Data Recovery</p>
-              <p className="text-xs text-zinc-400 mt-1 leading-relaxed">
-                Push all locally-stored data that hasn't reached Google Sheets yet — pending sales and locally-added products.
-              </p>
-            </div>
-
-            {recoverLog.length > 0 && (
-              <div className="bg-zinc-950 rounded-lg p-3 max-h-48 overflow-y-auto space-y-1">
-                {recoverLog.map((l, i) => (
-                  <p key={i} className={`text-xs font-mono ${typeColor(l.type)}`}>
-                    <span className="text-zinc-600">{l.t} </span>{l.msg}
-                  </p>
-                ))}
-                {recovering && <p className="text-xs text-amber-400 animate-pulse font-mono">Working...</p>}
-              </div>
-            )}
-
-            <button
-              onClick={handleRecoverAll}
-              disabled={recovering || !online || !api.isConfigured()}
-              className={`w-full py-3.5 rounded-xl font-bold text-sm flex items-center justify-center gap-2 active:scale-95 transition-all ${
-                recovered ? "bg-emerald-600 text-white" :
-                recovering ? "bg-zinc-700 text-zinc-400" :
-                !online ? "bg-zinc-800 text-zinc-500" :
-                "bg-amber-500 text-zinc-900 shadow-lg shadow-amber-500/20"
-              }`}
-            >
-              {recovering ? (
-                <><span className="w-4 h-4 border-2 border-zinc-500 border-t-zinc-200 rounded-full animate-spin" /> Recovering...</>
-              ) : recovered ? (
-                <>✓ Recovery Complete</>
-              ) : !online ? (
-                <>Go online to recover</>
-              ) : (
-                <>⬆ Push All Local Data to Sheets</>
-              )}
-            </button>
-            {!api.isConfigured() && <p className="text-xs text-red-400 text-center">API URL not set — cannot sync</p>}
-          </div>
-
-          {/* Quick sync */}
-          <div className="flex gap-3 pb-4">
-            <button onClick={() => { onSync(); onClose(); }} disabled={!online}
-              className="flex-1 py-3 rounded-xl bg-zinc-800 border border-zinc-700 text-zinc-300 font-medium text-sm flex items-center justify-center gap-1.5 disabled:opacity-40 active:scale-95 transition-all">
-              <svg width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M21 12a9 9 0 11-6.219-8.56"/></svg>
-              Quick Sync
-            </button>
-            <button onClick={onClose} className="flex-1 py-3 rounded-xl bg-zinc-800 border border-zinc-700 text-zinc-300 font-medium text-sm active:scale-95 transition-all">
-              Close
-            </button>
-          </div>
-        </div>
+        <p className="text-center text-zinc-600 text-xs mt-6">Enter any 4-digit PIN to continue</p>
       </div>
     </div>
   );
@@ -3613,14 +1484,12 @@ function SettingsPanel({ online, source, pendingCount, products, setProducts, se
 function RetailFlowPOS() {
   const [loggedIn, setLoggedIn] = useState(false);
   const [user, setUser] = useState(null);
-  const [activeTab, setActiveTab] = useState("dashboard");
-  const [autoOpenAdd, setAutoOpenAdd] = useState(false);
+  const [activeTab, setActiveTab] = useState("pos");
   const { products, setProducts, loading, source, refreshProducts } = useProducts();
   const [cart, setCart] = useState([]);
   const [sales, setSales] = useState([]);
   const [showPayment, setShowPayment] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
-  const [showDrawer, setShowDrawer] = useState(false);
   const { online, pendingCount, lastSync, syncing, setPendingCount } = useOnlineStatus();
 
   const cartTotal = cart.reduce((sum, c) => sum + c.lineTotal, 0);
@@ -3629,25 +1498,20 @@ function RetailFlowPOS() {
   // Load sales from cache on startup
   useEffect(() => {
     const loadSales = async () => {
+      try {
+        const cached = await dbGetAll("syncedSales");
+        if (cached.length > 0) setSales(cached);
+      } catch (e) { /* ignore */ }
+
+      // Also try from API
       if (api.isConfigured()) {
-        // API is configured — always pull from Sheets (source of truth)
-        // Clear any stale cached sales first so demo/old data never shows
-        await dbClear("syncedSales");
         const today = new Date().toISOString().split("T")[0];
         const result = await api.get("getSales", { date: today, limit: "200" });
         if (result && result.success) {
-          setSales(result.sales || []);
-          await dbPut("syncedSales", result.sales || []);
-        } else {
-          // API failed — show empty, not stale cache
-          setSales([]);
+          setSales(result.sales);
+          await dbClear("syncedSales");
+          await dbPut("syncedSales", result.sales);
         }
-      } else {
-        // No API — load from local cache only
-        try {
-          const cached = await dbGetAll("syncedSales");
-          if (cached.length > 0) setSales(cached);
-        } catch (e) { /* ignore */ }
       }
     };
     if (loggedIn) loadSales();
@@ -3713,17 +1577,9 @@ function RetailFlowPOS() {
     await refreshProducts();
   };
 
-  // Dashboard navigation handler
-  const handleNavigate = (tab) => {
-    if (tab === "inventory-add") { setActiveTab("inventory"); setAutoOpenAdd(true); }
-    else if (tab === "settings") { setShowSettings(true); }
-    else { setActiveTab(tab); }
-  };
-
   if (!loggedIn) return <LoginScreen onLogin={(u) => { setUser(u); setLoggedIn(true); }} />;
 
   const tabs = [
-    { id: "dashboard", label: "Home", icon: <svg width="22" height="22" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg> },
     { id: "pos", label: "Sell", icon: <svg width="22" height="22" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24"><path d="M3 7V5a2 2 0 012-2h2M17 3h2a2 2 0 012 2v2M21 17v2a2 2 0 01-2 2h-2M7 21H5a2 2 0 01-2-2v-2"/><line x1="7" y1="12" x2="17" y2="12"/><line x1="12" y1="7" x2="12" y2="17"/></svg> },
     { id: "inventory", label: "Stock", icon: <svg width="22" height="22" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24"><path d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/></svg> },
     { id: "history", label: "Sales", icon: <svg width="22" height="22" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24"><path d="M12 8v4l3 3"/><circle cx="12" cy="12" r="9"/></svg> },
@@ -3733,30 +1589,10 @@ function RetailFlowPOS() {
     <div className="h-screen flex flex-col bg-zinc-950 text-zinc-100 overflow-hidden" style={{ background: "linear-gradient(180deg, rgba(24,24,27,1) 0%, rgba(9,9,11,1) 100%)" }}>
       <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&display=swap" rel="stylesheet" />
 
-      {/* Side Drawer */}
-      <SideDrawer
-        open={showDrawer}
-        onClose={() => setShowDrawer(false)}
-        user={user}
-        activeTab={activeTab}
-        onNavigate={handleNavigate}
-        onLogout={() => { setLoggedIn(false); setUser(null); setCart([]); }}
-        online={online}
-        pendingCount={pendingCount}
-        syncing={syncing}
-        source={source}
-        onSync={handleManualSync}
-      />
-
-      {/* Header */}
+      {/* Header with Sync Status */}
       <header className="flex items-center justify-between px-4 py-3 border-b border-zinc-800/50 bg-zinc-950/80 backdrop-blur-sm">
         <div className="flex items-center gap-3">
-          {/* Hamburger */}
-          <button onClick={() => setShowDrawer(true)} className="w-9 h-9 rounded-xl bg-zinc-800/80 border border-zinc-700/40 flex flex-col items-center justify-center gap-1.5 active:scale-90 transition-all">
-            <span className="w-4 h-0.5 bg-zinc-300 rounded-full" />
-            <span className="w-4 h-0.5 bg-zinc-300 rounded-full" />
-            <span className="w-3 h-0.5 bg-zinc-300 rounded-full self-start ml-2.5" />
-          </button>
+          <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-amber-500 to-orange-600 flex items-center justify-center shadow-lg shadow-amber-500/10"><span className="text-lg">🏪</span></div>
           <div>
             <h1 className="text-sm font-bold text-zinc-100 leading-none" style={{ fontFamily: "'DM Sans', sans-serif" }}>Oola RetailFlow</h1>
             <p className="text-xs text-zinc-500 leading-none mt-0.5">{(user && user.name ? user.name : "User")} • {new Date().toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })}</p>
@@ -3766,14 +1602,23 @@ function RetailFlowPOS() {
         <div className="flex items-center gap-2">
           {/* Connection & Sync Status */}
           <button onClick={handleManualSync} className="flex items-center gap-1.5 px-2 py-1 rounded-lg hover:bg-zinc-800 transition-all" title={online ? "Online" : "Offline"}>
+            {/* Online/Offline dot */}
             <span className={`w-2 h-2 rounded-full ${online ? "bg-emerald-400 shadow shadow-emerald-400/50" : "bg-red-400 shadow shadow-red-400/50"} ${syncing ? "animate-pulse" : ""}`} />
+
+            {/* Pending sync count */}
             {pendingCount > 0 && (
               <span className="flex items-center gap-0.5 text-xs text-amber-400 font-medium">
                 <svg width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" className={syncing ? "animate-spin" : ""}><path d="M21 12a9 9 0 11-6.219-8.56"/></svg>
                 {pendingCount}
               </span>
             )}
-            <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${source === "api" ? "bg-emerald-500/15 text-emerald-400" : source === "cache" ? "bg-blue-500/15 text-blue-400" : "bg-zinc-700 text-zinc-400"}`}>
+
+            {/* Data source badge */}
+            <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${
+              source === "api" ? "bg-emerald-500/15 text-emerald-400" :
+              source === "cache" ? "bg-blue-500/15 text-blue-400" :
+              "bg-zinc-700 text-zinc-400"
+            }`}>
               {source === "api" ? "Live" : source === "cache" ? "Cached" : "Demo"}
             </span>
           </button>
@@ -3782,6 +1627,8 @@ function RetailFlowPOS() {
           <button onClick={() => setShowSettings(!showSettings)} className="text-zinc-500 hover:text-zinc-300 p-1 rounded-lg hover:bg-zinc-800 transition-all">
             <svg width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24"><path d="M12 15a3 3 0 100-6 3 3 0 000 6z"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
           </button>
+
+          <button onClick={() => { setLoggedIn(false); setUser(null); setCart([]); }} className="text-xs text-zinc-500 hover:text-red-400 transition-colors px-2 py-1.5 rounded-lg hover:bg-red-500/10">Out</button>
         </div>
       </header>
 
@@ -3796,14 +1643,48 @@ function RetailFlowPOS() {
 
       {/* Settings Dropdown */}
       {showSettings && (
-        <SettingsPanel
-          online={online} source={source} pendingCount={pendingCount}
-          products={products} setProducts={setProducts}
-          setSales={setSales} setPendingCount={setPendingCount}
-          refreshProducts={refreshProducts}
-          onSync={() => { handleManualSync(); }}
-          onClose={() => setShowSettings(false)}
-        />
+        <div className="absolute right-4 top-14 z-40 w-72 bg-zinc-900 border border-zinc-700 rounded-2xl shadow-2xl p-4 space-y-3">
+          <h3 className="text-sm font-bold text-zinc-200">Settings</h3>
+
+          <div>
+            <label className="text-xs text-zinc-500 block mb-1">API URL (Apps Script Web App)</label>
+            <div className="bg-zinc-800 rounded-lg p-2 text-xs text-zinc-400 font-mono break-all">
+              {API_URL || "Not configured — using demo mode"}
+            </div>
+            <p className="text-xs text-zinc-600 mt-1">Set API_URL in the code to connect to your Google Sheet</p>
+          </div>
+
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-zinc-400">Connection</span>
+            <span className={`text-xs font-medium ${online ? "text-emerald-400" : "text-red-400"}`}>{online ? "Online" : "Offline"}</span>
+          </div>
+
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-zinc-400">Data Source</span>
+            <span className="text-xs font-medium text-zinc-300">{source === "api" ? "Live (Google Sheets)" : source === "cache" ? "Cached (IndexedDB)" : "Demo Data"}</span>
+          </div>
+
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-zinc-400">Pending Sales</span>
+            <span className={`text-xs font-medium ${pendingCount > 0 ? "text-amber-400" : "text-emerald-400"}`}>{pendingCount > 0 ? `${pendingCount} awaiting sync` : "All synced ✓"}</span>
+          </div>
+
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-zinc-400">Device ID</span>
+            <span className="text-xs text-zinc-500 font-mono">{DEVICE_ID}</span>
+          </div>
+
+          <div className="flex gap-2 pt-2 border-t border-zinc-800">
+            <button onClick={() => { handleManualSync(); setShowSettings(false); }}
+              className="flex-1 py-2 rounded-lg bg-amber-500/20 text-amber-400 text-xs font-medium hover:bg-amber-500/30 transition-all">
+              ↻ Sync Now
+            </button>
+            <button onClick={() => setShowSettings(false)}
+              className="flex-1 py-2 rounded-lg bg-zinc-800 text-zinc-400 text-xs font-medium hover:bg-zinc-700 transition-all">
+              Close
+            </button>
+          </div>
+        </div>
       )}
 
       {/* Loading indicator */}
@@ -3815,15 +1696,9 @@ function RetailFlowPOS() {
 
       {/* Content */}
       <main className="flex-1 overflow-hidden">
-        {activeTab === "dashboard"   && <DashboardScreen sales={sales} products={products} user={user} onNavigate={handleNavigate} />}
-        {activeTab === "pos"         && <POSScreen products={products} cart={cart} setCart={setCart} onComplete={() => setShowPayment(true)} />}
-        {activeTab === "inventory"   && <InventoryScreen products={products} setProducts={setProducts} refreshProducts={refreshProducts} user={user} autoOpenAdd={autoOpenAdd} onAddOpened={() => setAutoOpenAdd(false)} />}
-        {activeTab === "purchases"   && <PurchasesScreen products={products} setProducts={setProducts} />}
-        {activeTab === "adjustments" && <StockAdjustmentsScreen products={products} setProducts={setProducts} />}
-        {activeTab === "history"     && <HistoryScreen sales={sales} />}
-        {activeTab === "expenses"    && <ExpensesScreen />}
-        {activeTab === "customers"   && <CustomersScreen />}
-        {activeTab === "reports"     && <ReportsScreen sales={sales} products={products} />}
+        {activeTab === "pos" && <POSScreen products={products} cart={cart} setCart={setCart} onComplete={() => setShowPayment(true)} />}
+        {activeTab === "inventory" && <InventoryScreen products={products} setProducts={setProducts} />}
+        {activeTab === "history" && <HistoryScreen sales={sales} />}
       </main>
 
       <nav className="flex border-t border-zinc-800/50 bg-zinc-950/95 backdrop-blur-sm px-2 pb-1 pt-1">
