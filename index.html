@@ -1359,36 +1359,71 @@ function InventoryScreen({ products, setProducts }) {
 
       <div className="flex-1 overflow-y-auto px-4 pb-4 space-y-2">
         {filtered.map(p => {
-          const typeInfo = TYPE_LABELS[p.type];
           const stock = getStock(p);
+          const price = getPrice(p);
           const isEditing = editingId === p.id;
+          const stockPercent = Math.min(100, (stock / 50) * 100);
+          const priceLabel = p.type === "weight" ? formatUGX(p.pricePerKg) + "/kg"
+            : p.type === "piece" ? formatUGX(p.pricePerPiece) + "/pc"
+            : p.type === "variant" ? p.variants.map(v => v.label + ": " + v.stock).join(" · ")
+            : formatUGX(p.price);
+          const profit = p.cost ? Math.round(((price - p.cost) / price) * 100) : 0;
           return (
-            <div key={p.id} className="bg-zinc-800/40 rounded-xl border border-zinc-700/30 p-3 flex items-center gap-3">
-              <span className="text-2xl w-9 text-center">{p.image}</span>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
-                  <p className="text-sm text-zinc-200 font-medium truncate">{p.name}</p>
-                  <span className={`px-1.5 py-0.5 rounded text-xs font-semibold border ${typeInfo.color}`} style={{ fontSize: "9px" }}>{typeInfo.icon} {typeInfo.label}</span>
+            <div key={p.id} className={`rounded-xl border p-3 transition-all ${
+              stock <= 5 ? "bg-red-500/5 border-red-500/20" : 
+              stock <= 15 ? "bg-zinc-800/40 border-yellow-500/20" : 
+              "bg-zinc-800/40 border-zinc-700/20"
+            }`}>
+              <div className="flex items-center gap-3">
+                <div className={`w-11 h-11 rounded-xl flex items-center justify-center text-sm font-bold shrink-0 ${
+                  p.category === "Beverages" ? "bg-blue-500/20 text-blue-400" :
+                  p.category === "Bakery" ? "bg-orange-500/20 text-orange-400" :
+                  p.category === "Grocery" ? "bg-emerald-500/20 text-emerald-400" :
+                  p.category === "Household" ? "bg-purple-500/20 text-purple-400" :
+                  p.category === "Personal Care" ? "bg-pink-500/20 text-pink-400" :
+                  p.category === "Fresh Produce" ? "bg-lime-500/20 text-lime-400" :
+                  p.category === "Dairy" ? "bg-cyan-500/20 text-cyan-400" :
+                  p.category === "Snacks" ? "bg-yellow-500/20 text-yellow-400" :
+                  p.category === "Electronics" ? "bg-sky-500/20 text-sky-400" :
+                  p.category === "Battery" ? "bg-sky-500/20 text-sky-400" :
+                  p.category === "Pads" ? "bg-pink-500/20 text-pink-400" :
+                  "bg-zinc-600/30 text-zinc-400"
+                }`}>{p.image === "📦" ? p.name.substring(0,2).toUpperCase() : p.image}</div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm text-zinc-100 font-semibold truncate">{p.name}</p>
+                  <div className="flex items-center gap-2 mt-0.5">
+                    <span className="text-xs text-blue-400 font-medium">{priceLabel}</span>
+                    <span className="text-xs text-zinc-600">•</span>
+                    <span className="text-xs text-zinc-500">{p.category}</span>
+                    {profit > 0 && p.type !== "variant" && <>
+                      <span className="text-xs text-zinc-600">•</span>
+                      <span className="text-xs text-emerald-400/70">{profit}% margin</span>
+                    </>}
+                  </div>
                 </div>
-                <p className="text-xs text-zinc-500 mt-0.5">
-                  {p.type === "variant" ? p.variants.map(v => v.label + ": " + v.stock).join(" · ") :
-                   p.type === "weight" ? formatUGX(p.pricePerKg) + "/kg · " + p.category :
-                   p.type === "piece" ? formatUGX(p.pricePerPiece) + "/pc · " + p.category :
-                   formatUGX(p.price) + " · " + p.category}
-                </p>
+                {isEditing ? (
+                  <div className="flex items-center gap-1 shrink-0">
+                    <input type="number" value={editValue} onChange={e => setEditValue(e.target.value)} onKeyDown={e => { if(e.key==="Enter") handleStockSave(p.id); }} autoFocus className="w-16 bg-zinc-700 border border-blue-500/50 rounded-lg px-2 py-1.5 text-sm text-center text-zinc-100 focus:outline-none" />
+                    <button onClick={() => handleStockSave(p.id)} className="w-8 h-8 rounded-lg bg-blue-500/20 text-blue-400 flex items-center justify-center text-sm font-bold">✓</button>
+                    <button onClick={() => {setEditingId(null);setEditValue("");}} className="w-8 h-8 rounded-lg bg-zinc-700 text-zinc-400 flex items-center justify-center text-sm">✕</button>
+                  </div>
+                ) : (
+                  <button onClick={() => {setEditingId(p.id);setEditValue(String(stock));}}
+                    className={`px-3 py-2 rounded-xl font-bold text-sm border min-w-fit shrink-0 ${
+                      stock <= 5 ? "bg-red-500/15 border-red-500/30 text-red-400" : 
+                      stock <= 15 ? "bg-yellow-500/10 border-yellow-500/30 text-yellow-400" : 
+                      "bg-zinc-700/50 border-zinc-600/30 text-zinc-200"
+                    }`}>
+                    {stock} <span className="text-xs font-normal text-zinc-500">{p.unit}</span>
+                  </button>
+                )}
               </div>
-              {isEditing ? (
-                <div className="flex items-center gap-1">
-                  <input type="number" value={editValue} onChange={e => setEditValue(e.target.value)} onKeyDown={e => { if(e.key==="Enter") handleStockSave(p.id); }} autoFocus className="w-16 bg-zinc-700 border border-blue-500/50 rounded-lg px-2 py-1 text-sm text-center text-zinc-100 focus:outline-none" />
-                  <button onClick={() => handleStockSave(p.id)} className="w-7 h-7 rounded-lg bg-blue-500/20 text-blue-400 flex items-center justify-center text-sm font-bold">✓</button>
-                  <button onClick={() => {setEditingId(null);setEditValue("");}} className="w-7 h-7 rounded-lg bg-zinc-700 text-zinc-400 flex items-center justify-center text-sm">✕</button>
-                </div>
-              ) : (
-                <button onClick={() => {setEditingId(p.id);setEditValue(String(stock));}}
-                  className={`px-3 py-1.5 rounded-lg font-bold text-sm border ${stock <= 5 ? "bg-red-500/10 border-red-500/30 text-red-400" : stock <= 15 ? "bg-yellow-500/10 border-yellow-500/30 text-yellow-400" : "bg-zinc-700/50 border-zinc-600/30 text-zinc-300"}`}>
-                  {stock} {p.unit}
-                </button>
-              )}
+              {/* Stock level bar */}
+              <div className="mt-2 h-1 bg-zinc-800 rounded-full overflow-hidden">
+                <div className={`h-full rounded-full transition-all ${
+                  stock <= 5 ? "bg-red-500" : stock <= 15 ? "bg-yellow-500" : "bg-emerald-500"
+                }`} style={{width: stockPercent + "%"}}></div>
+              </div>
             </div>
           );
         })}
