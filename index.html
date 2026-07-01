@@ -285,26 +285,17 @@ function useProducts() {
 function playBeep() {
   try {
     var ctx = new (window.AudioContext || window.webkitAudioContext)();
-    var osc1 = ctx.createOscillator();
-    var gain1 = ctx.createGain();
-    osc1.type = "square";
-    osc1.frequency.setValueAtTime(2637, ctx.currentTime);
-    gain1.gain.setValueAtTime(0.3, ctx.currentTime);
-    gain1.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.08);
-    osc1.connect(gain1);
-    gain1.connect(ctx.destination);
-    osc1.start(ctx.currentTime);
-    osc1.stop(ctx.currentTime + 0.08);
-    var osc2 = ctx.createOscillator();
-    var gain2 = ctx.createGain();
-    osc2.type = "square";
-    osc2.frequency.setValueAtTime(1975, ctx.currentTime + 0.09);
-    gain2.gain.setValueAtTime(0.25, ctx.currentTime + 0.09);
-    gain2.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.18);
-    osc2.connect(gain2);
-    gain2.connect(ctx.destination);
-    osc2.start(ctx.currentTime + 0.09);
-    osc2.stop(ctx.currentTime + 0.18);
+    var osc = ctx.createOscillator();
+    var gain = ctx.createGain();
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(2400, ctx.currentTime);
+    gain.gain.setValueAtTime(0.3, ctx.currentTime);
+    gain.gain.setValueAtTime(0.3, ctx.currentTime + 0.12);
+    gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.18);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(ctx.currentTime);
+    osc.stop(ctx.currentTime + 0.18);
     setTimeout(function() { ctx.close(); }, 300);
   } catch(e) {}
 }
