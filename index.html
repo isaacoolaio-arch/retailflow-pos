@@ -428,7 +428,7 @@ function WeightEntryModal({ product, onAdd, onClose }) {
           </div>
           <div>
             <label className="text-xs text-zinc-500 uppercase tracking-wider mb-2 block">Quick Select</label>
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-2 gap-2">
               {quickWeights.map(w => (
                 <button key={w} onClick={() => setWeight(w.toString())}
                   className={`py-3 rounded-xl text-sm font-bold transition-all active:scale-95 ${
@@ -1154,14 +1154,28 @@ function POSScreen({ products, cart, setCart, onComplete }) {
 
             return (
               <button key={p.id} onClick={() => handleProductTap(p)}
-                className={`relative flex flex-col items-center p-2.5 rounded-2xl border transition-all duration-200 active:scale-95 ${
-                  inCart ? "bg-amber-500/10 border-amber-500/40" : "bg-zinc-800/40 border-zinc-700/20 hover:bg-zinc-800/70"
+                className={`relative flex flex-col items-start p-2 rounded-xl border transition-all duration-200 active:scale-95 overflow-hidden ${
+                  inCart ? "bg-amber-500/15 border-amber-500/50" : "bg-zinc-800/50 border-zinc-700/20 hover:bg-zinc-800/80"
                 }`}>
-                <span className={`absolute top-1.5 left-1.5 px-1.5 py-0.5 rounded-md text-xs font-semibold border ${typeInfo.color}`} style={{ fontSize: "9px" }}>{typeInfo.icon}</span>
-                {inCart && <span className="absolute -top-1.5 -right-1.5 bg-amber-500 text-zinc-900 text-xs font-bold rounded-full w-5 h-5 flex items-center justify-center shadow">{inCart.qty}</span>}
-                <span className="text-2xl mb-1 mt-1">{p.image}</span>
-                <span className="text-xs text-zinc-300 text-center leading-tight line-clamp-2 font-medium">{p.name}</span>
-                <span className="text-xs text-amber-400 font-bold mt-0.5">{priceDisplay}</span>
+                {inCart && <span className="absolute -top-1 -right-1 bg-amber-500 text-zinc-900 text-xs font-bold rounded-full w-5 h-5 flex items-center justify-center shadow-lg z-10">{inCart.qty}</span>}
+                <div className="w-full flex items-center gap-1.5 mb-1">
+                  <span className={`w-6 h-6 rounded-md flex items-center justify-center text-xs font-bold shrink-0 ${
+                    p.category === "Beverages" ? "bg-blue-500/20 text-blue-400" :
+                    p.category === "Bakery" ? "bg-orange-500/20 text-orange-400" :
+                    p.category === "Grocery" ? "bg-emerald-500/20 text-emerald-400" :
+                    p.category === "Household" ? "bg-purple-500/20 text-purple-400" :
+                    p.category === "Personal Care" ? "bg-pink-500/20 text-pink-400" :
+                    p.category === "Fresh Produce" ? "bg-lime-500/20 text-lime-400" :
+                    p.category === "Dairy" ? "bg-cyan-500/20 text-cyan-400" :
+                    p.category === "Snacks" ? "bg-yellow-500/20 text-yellow-400" :
+                    p.category === "Spices" ? "bg-red-500/20 text-red-400" :
+                    p.category === "Ready Food" ? "bg-rose-500/20 text-rose-400" :
+                    "bg-zinc-600/20 text-zinc-400"
+                  }`}>{p.image === "📦" ? p.name.substring(0,2).toUpperCase() : p.image}</span>
+                  <span className={`px-1 py-0.5 rounded text-zinc-500 border border-zinc-700/50`} style={{ fontSize: "8px" }}>{typeInfo.icon}</span>
+                </div>
+                <span className="text-xs text-zinc-200 text-left leading-tight line-clamp-2 font-semibold w-full">{p.name}</span>
+                <span className="text-xs text-amber-400 font-bold mt-auto pt-1">{priceDisplay}</span>
               </button>
             );
           })}
