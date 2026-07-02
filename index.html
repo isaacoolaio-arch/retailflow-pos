@@ -1292,8 +1292,8 @@ function InventoryScreen({ products, setProducts }) {
     setEditingId(null); setEditValue("");
   };
 
-  const handleAddProduct = () => {
-    if (!np.name.trim() || !setProducts) return;
+  const handleAddProduct = async () => {
+    if (!np.name.trim()) { playWarning(); return; }
     const prefix = np.type === "weight" ? "W" : np.type === "piece" ? "PC" : "P";
     const newP = {
       id: prefix + String(Date.now()).slice(-4), type: np.type, barcode: np.barcode || "",
@@ -1304,7 +1304,19 @@ function InventoryScreen({ products, setProducts }) {
     if (np.type === "barcode") newP.price = Number(np.price) || 0;
     if (np.type === "weight") { newP.pricePerKg = Number(np.pricePerKg) || 0; newP.minWeight = 0.25; newP.weightStep = 0.25; }
     if (np.type === "piece") newP.pricePerPiece = Number(np.pricePerPiece) || 0;
+    
+    // Add to local state
     setProducts(prev => [...prev, newP]);
+    
+    // Save to API if configured
+    if (api.isConfigured()) {
+      try { await api.post("addProduct", newP); } catch(e) { console.log("API save failed, saved locally"); }
+    }
+    
+    // Save to IndexedDB cache
+    try { await dbPut("products", newP); } catch(e) {}
+    
+    playBeep();
     setNp({name:"",type:"barcode",category:"General",price:"",cost:"",stock:"",barcode:"",unit:"pc",image:"📦",pricePerKg:"",pricePerPiece:""});
     setShowAddForm(false);
   };
@@ -1337,60 +1349,134 @@ function InventoryScreen({ products, setProducts }) {
       </div>
 
       {showAddForm && (
-        <div className="mx-4 mb-2 bg-zinc-800/80 border border-blue-500/30 rounded-xl p-4 space-y-3">
-          <h3 className="text-sm font-bold text-blue-400">Add New Product</h3>
-          <div className="grid grid-cols-2 gap-2">
-            <input type="text" value={np.name} onChange={e => setNp({...np, name: e.target.value})} placeholder="Product name" className="col-span-2 bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-blue-500" />
-            <select value={np.type} onChange={e => setNp({...np, type: e.target.value})} className="bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200">
-              <option value="barcode">📦 Barcoded</option><option value="weight">⚖️ By Weight</option><option value="piece">🔢 By Piece</option>
-            </select>
-            <input type="text" value={np.category} onChange={e => setNp({...np, category: e.target.value})} placeholder="Category" className="bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none" />
-            {np.type === "barcode" && <input type="number" value={np.price} onChange={e => setNp({...np, price: e.target.value})} placeholder="Sell Price (UGX)" className="bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none" />}
-            {np.type === "weight" && <input type="number" value={np.pricePerKg} onChange={e => setNp({...np, pricePerKg: e.target.value})} placeholder="Price/Kg (UGX)" className="bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none" />}
-            {np.type === "piece" && <input type="number" value={np.pricePerPiece} onChange={e => setNp({...np, pricePerPiece: e.target.value})} placeholder="Price/Piece (UGX)" className="bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none" />}
-            <input type="number" value={np.cost} onChange={e => setNp({...np, cost: e.target.value})} placeholder="Cost Price" className="bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none" />
-            <input type="number" value={np.stock} onChange={e => setNp({...np, stock: e.target.value})} placeholder="Stock Qty" className="bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none" />
-            <div className="col-span-2 flex gap-2">
-              <input type="text" value={np.barcode} onChange={e => setNp({...np, barcode: e.target.value})} placeholder="Barcode number" className="flex-1 bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none" />
-              <button type="button" onClick={function(){
-                try {
-                  var overlay = document.createElement("div"); 
-                  overlay.style.cssText = "position:fixed;inset:0;z-index:9998;background:rgba(0,0,0,0.95);display:flex;flex-direction:column;align-items:center;justify-content:center;";
-                  var header = document.createElement("div");
-                  header.style.cssText = "position:fixed;top:0;left:0;right:0;z-index:10001;display:flex;justify-content:space-between;align-items:center;padding:16px;background:rgba(0,0,0,0.8);";
-                  header.innerHTML = "<span style=\"color:white;font-weight:bold;font-size:16px\">Scan Barcode</span>";
-                  var closeBtn = document.createElement("button"); 
-                  closeBtn.textContent = "✕ Close"; 
-                  closeBtn.style.cssText = "background:#ef4444;color:white;border:none;padding:10px 20px;border-radius:12px;font-size:14px;font-weight:bold;cursor:pointer;";
-                  header.appendChild(closeBtn);
-                  var scanDiv = document.createElement("div"); 
-                  scanDiv.id = "inv-barcode-reader"; 
-                  scanDiv.style.cssText = "width:100%;max-width:500px;margin-top:60px;";
-                  overlay.appendChild(header);
-                  overlay.appendChild(scanDiv);
-                  document.body.appendChild(overlay);
-                  var sc = new Html5Qrcode("inv-barcode-reader");
-                  var cleanup = function(){ try{sc.stop();}catch(e){} try{document.body.removeChild(overlay);}catch(e){} };
-                  closeBtn.onclick = cleanup;
-                  sc.start(
-                    {facingMode:"environment"},
-                    {fps:10, qrbox:{width:250,height:150}, aspectRatio:1.0},
-                    function(code){ cleanup(); playBeep(); setNp(function(prev){return Object.assign({},prev,{barcode:code});}); },
-                    function(){}
-                  ).catch(function(e){ cleanup(); playWarning(); alert("Camera error: " + String(e)); });
-                }catch(e){playWarning(); alert("Scanner error: " + e.message);}
-              }} className="px-3 bg-cyan-500 text-white rounded-lg font-bold text-sm active:scale-95 flex items-center gap-1">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 7V5a2 2 0 012-2h2M17 3h2a2 2 0 012 2v2M21 17v2a2 2 0 01-2 2h-2M7 21H5a2 2 0 01-2-2v-2"/><line x1="7" y1="12" x2="17" y2="12"/></svg>
-                Scan
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center">
+          <div className="w-full max-w-md bg-zinc-900 rounded-t-3xl sm:rounded-3xl border border-zinc-700 shadow-2xl max-h-[90vh] flex flex-col">
+            {/* Header */}
+            <div className="flex items-center justify-between p-5 border-b border-zinc-800 shrink-0">
+              <div>
+                <h3 className="text-lg font-bold text-zinc-100">Add New Product</h3>
+                <p className="text-xs text-zinc-500 mt-0.5">Fill in the details below</p>
+              </div>
+              <button onClick={() => setShowAddForm(false)} className="w-10 h-10 rounded-full bg-zinc-800 flex items-center justify-center text-zinc-400 hover:text-zinc-200">
+                <svg width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg>
               </button>
             </div>
-          </div>
-          <div className="flex gap-1 flex-wrap">{emojis.map(em => (
-            <button key={em} onClick={() => setNp({...np, image: em})} className={`w-8 h-8 rounded-lg text-lg flex items-center justify-center ${np.image === em ? "bg-blue-500/30 border border-blue-500" : "bg-zinc-900 hover:bg-zinc-700"}`}>{em}</button>
-          ))}</div>
-          <div className="flex gap-2 pb-2">
-            <button onClick={handleAddProduct} disabled={!np.name.trim()} className="flex-1 py-3 rounded-lg bg-blue-500 text-white font-bold text-sm active:scale-95 disabled:opacity-40">Save Product</button>
-            <button onClick={() => setShowAddForm(false)} className="flex-1 py-3 rounded-lg bg-zinc-700 text-zinc-300 font-medium text-sm active:scale-95">Cancel</button>
+
+            {/* Form Body — scrollable */}
+            <div className="flex-1 overflow-y-auto p-5 space-y-4">
+              {/* Product Name */}
+              <div>
+                <label className="text-xs text-zinc-500 uppercase tracking-wider mb-1.5 block">Product Name *</label>
+                <input type="text" value={np.name} onChange={e => setNp({...np, name: e.target.value})} placeholder="e.g. Mukwano Soap" autoFocus
+                  className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3 text-zinc-100 placeholder-zinc-600 focus:outline-none focus:border-blue-500 text-base" />
+              </div>
+
+              {/* Type & Category */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs text-zinc-500 uppercase tracking-wider mb-1.5 block">Sell Type</label>
+                  <select value={np.type} onChange={e => setNp({...np, type: e.target.value})}
+                    className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3 text-zinc-200 focus:outline-none focus:border-blue-500">
+                    <option value="barcode">📦 Barcoded</option>
+                    <option value="weight">⚖️ By Weight</option>
+                    <option value="piece">🔢 By Piece</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs text-zinc-500 uppercase tracking-wider mb-1.5 block">Category</label>
+                  <input type="text" value={np.category} onChange={e => setNp({...np, category: e.target.value})} placeholder="e.g. Household"
+                    className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3 text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-blue-500" />
+                </div>
+              </div>
+
+              {/* Price */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs text-zinc-500 uppercase tracking-wider mb-1.5 block">
+                    {np.type === "weight" ? "Price / Kg" : np.type === "piece" ? "Price / Piece" : "Sell Price"}
+                  </label>
+                  <input type="number" 
+                    value={np.type === "weight" ? np.pricePerKg : np.type === "piece" ? np.pricePerPiece : np.price} 
+                    onChange={e => {
+                      var v = e.target.value;
+                      if (np.type === "weight") setNp({...np, pricePerKg: v});
+                      else if (np.type === "piece") setNp({...np, pricePerPiece: v});
+                      else setNp({...np, price: v});
+                    }}
+                    placeholder="UGX"
+                    className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3 text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-blue-500 font-mono" />
+                </div>
+                <div>
+                  <label className="text-xs text-zinc-500 uppercase tracking-wider mb-1.5 block">Cost Price</label>
+                  <input type="number" value={np.cost} onChange={e => setNp({...np, cost: e.target.value})} placeholder="UGX"
+                    className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3 text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-blue-500 font-mono" />
+                </div>
+              </div>
+
+              {/* Stock & Unit */}
+              <div>
+                <label className="text-xs text-zinc-500 uppercase tracking-wider mb-1.5 block">Opening Stock</label>
+                <input type="number" value={np.stock} onChange={e => setNp({...np, stock: e.target.value})} placeholder="How many in stock?"
+                  className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3 text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-blue-500 font-mono text-lg" />
+              </div>
+
+              {/* Barcode */}
+              <div>
+                <label className="text-xs text-zinc-500 uppercase tracking-wider mb-1.5 block">Barcode (optional)</label>
+                <div className="flex gap-2">
+                  <input type="text" value={np.barcode} onChange={e => setNp({...np, barcode: e.target.value})} placeholder="Type or scan barcode"
+                    className="flex-1 bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3 text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-blue-500 font-mono" />
+                  <button type="button" onClick={function(){
+                    try {
+                      var overlay = document.createElement("div"); 
+                      overlay.style.cssText = "position:fixed;inset:0;z-index:9998;background:rgba(0,0,0,0.95);display:flex;flex-direction:column;align-items:center;justify-content:center;";
+                      var header = document.createElement("div");
+                      header.style.cssText = "position:fixed;top:0;left:0;right:0;z-index:10001;display:flex;justify-content:space-between;align-items:center;padding:16px;background:rgba(0,0,0,0.8);";
+                      header.innerHTML = "<span style=\"color:white;font-weight:bold;font-size:16px\">Scan Barcode</span>";
+                      var closeBtn = document.createElement("button"); 
+                      closeBtn.textContent = "✕ Close"; 
+                      closeBtn.style.cssText = "background:#ef4444;color:white;border:none;padding:10px 20px;border-radius:12px;font-size:14px;font-weight:bold;cursor:pointer;";
+                      header.appendChild(closeBtn);
+                      var scanDiv = document.createElement("div"); 
+                      scanDiv.id = "inv-barcode-reader"; 
+                      scanDiv.style.cssText = "width:100%;max-width:500px;margin-top:60px;";
+                      overlay.appendChild(header);
+                      overlay.appendChild(scanDiv);
+                      document.body.appendChild(overlay);
+                      var sc = new Html5Qrcode("inv-barcode-reader");
+                      var cleanup = function(){ try{sc.stop();}catch(e){} try{document.body.removeChild(overlay);}catch(e){} };
+                      closeBtn.onclick = cleanup;
+                      sc.start(
+                        {facingMode:"environment"},
+                        {fps:10, qrbox:{width:250,height:150}, aspectRatio:1.0},
+                        function(code){ cleanup(); playBeep(); setNp(function(prev){return Object.assign({},prev,{barcode:code});}); },
+                        function(){}
+                      ).catch(function(e){ cleanup(); playWarning(); alert("Camera error: " + String(e)); });
+                    }catch(e){playWarning(); alert("Scanner error: " + e.message);}
+                  }} className="px-4 py-3 bg-cyan-500 text-white rounded-xl font-bold text-sm active:scale-95 flex items-center gap-2">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 7V5a2 2 0 012-2h2M17 3h2a2 2 0 012 2v2M21 17v2a2 2 0 01-2 2h-2M7 21H5a2 2 0 01-2-2v-2"/><line x1="7" y1="12" x2="17" y2="12"/></svg>
+                    Scan
+                  </button>
+                </div>
+              </div>
+
+              {/* Icon Picker */}
+              <div>
+                <label className="text-xs text-zinc-500 uppercase tracking-wider mb-1.5 block">Icon</label>
+                <div className="flex gap-1.5 flex-wrap">{emojis.map(em => (
+                  <button key={em} onClick={() => setNp({...np, image: em})} className={`w-9 h-9 rounded-lg text-lg flex items-center justify-center transition-all ${np.image === em ? "bg-blue-500/30 border-2 border-blue-500 scale-110" : "bg-zinc-800 hover:bg-zinc-700"}`}>{em}</button>
+                ))}</div>
+              </div>
+            </div>
+
+            {/* Footer Buttons — always visible */}
+            <div className="p-5 border-t border-zinc-800 flex gap-3 shrink-0">
+              <button onClick={() => setShowAddForm(false)} className="flex-1 py-3.5 rounded-xl bg-zinc-800 text-zinc-300 font-semibold text-base active:scale-95 transition-all">Cancel</button>
+              <button onClick={handleAddProduct} disabled={!np.name.trim()} 
+                className="flex-1 py-3.5 rounded-xl bg-gradient-to-r from-blue-500 to-indigo-500 text-white font-bold text-base active:scale-95 transition-all shadow-lg shadow-blue-500/20 disabled:opacity-40 disabled:shadow-none">
+                Save Product
+              </button>
+            </div>
           </div>
         </div>
       )}
