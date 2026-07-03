@@ -230,36 +230,42 @@ function useProducts() {
   useEffect(() => {
     const load = async () => {
       setLoading(true);
+      let loadedFromCache = false;
 
-      // 1. Try loading from IndexedDB cache first (instant)
+      // 1. Load from IndexedDB cache first (instant, works offline)
       try {
         const cached = await dbGetAll("products");
         if (cached.length > 0) {
           setProducts(cached);
           setSource("cache");
           setLoading(false);
+          loadedFromCache = true;
         }
-      } catch (e) { /* continue */ }
+      } catch (e) { console.log("Cache load error:", e); }
 
-      // 2. Try fetching from API (background refresh)
-      if (api.isConfigured()) {
-        const result = await api.get("getProducts");
-        if (result && result.success && result.products) {
-          setProducts(result.products);
-          setSource("api");
-          // Cache products for offline
-          await dbClear("products");
-          await dbPut("products", result.products);
-          await dbPut("meta", { key: "lastProductSync", value: new Date().toISOString() });
-          setLoading(false);
-          return;
-        }
+      // 2. Try fetching fresh from API (only if online)
+      if (navigator.onLine && api.isConfigured()) {
+        try {
+          const result = await api.get("getProducts");
+          // Check it's a real result, not the offline error response
+          if (result && result.success && result.products && result.products.length > 0) {
+            setProducts(result.products);
+            setSource("api");
+            await dbClear("products");
+            await dbPut("products", result.products);
+            await dbPut("meta", { key: "lastProductSync", value: new Date().toISOString() });
+            setLoading(false);
+            return;
+          }
+        } catch (e) { console.log("API load error:", e); }
       }
 
-      // 3. Fallback to demo data if nothing else worked
-      if (products.length === 0) {
+      // 3. Fallback to demo data ONLY if cache was empty
+      if (!loadedFromCache) {
         setProducts(MOCK_PRODUCTS);
         setSource("demo");
+        // Seed the cache with demo data so it persists offline
+        try { await dbPut("products", MOCK_PRODUCTS); } catch(e) {}
       }
       setLoading(false);
     };
@@ -267,14 +273,16 @@ function useProducts() {
   }, []);
 
   const refreshProducts = async () => {
-    if (!api.isConfigured()) return;
-    const result = await api.get("getProducts");
-    if (result && result.success && result.products) {
-      setProducts(result.products);
-      setSource("api");
-      await dbClear("products");
-      await dbPut("products", result.products);
-    }
+    if (!navigator.onLine || !api.isConfigured()) return;
+    try {
+      const result = await api.get("getProducts");
+      if (result && result.success && result.products && result.products.length > 0) {
+        setProducts(result.products);
+        setSource("api");
+        await dbClear("products");
+        await dbPut("products", result.products);
+      }
+    } catch(e) { console.log("Refresh error:", e); }
   };
 
   return { products, setProducts, loading, source, refreshProducts };
@@ -1730,25 +1738,35 @@ function RetailFlowPOS() {
     };
     setSales(prev => [...prev, localSale]);
 
-    // Save to IndexedDB pending queue
+    // Deduct stock locally (works offline)
+    setProducts(prev => prev.map(p => {
+      const cartItem = cart.find(c => c.id === p.id);
+      if (cartItem) {
+        const deduction = cartItem.type === "weight" ? (cartItem.weight || 0) : (cartItem.qty || 0);
+        return { ...p, stock: Math.max(0, (p.stock || 0) - deduction) };
+      }
+      return p;
+    }));
+
+    // Save to IndexedDB pending queue (survives offline + app restart)
     try {
       await dbPut("pendingSales", saleData);
       setPendingCount(prev => prev + 1);
-    } catch (e) { /* continue */ }
+    } catch (e) { console.log("Failed to queue sale:", e); }
 
     // Try immediate sync if online
-    if (online && api.isConfigured()) {
+    if (navigator.onLine && api.isConfigured()) {
       try {
         const result = await api.post("recordSale", saleData);
-        if (result && result.success) {
+        if (result && result.success && result.saleId) {
           await dbDelete("pendingSales", offlineId);
           setPendingCount(prev => Math.max(0, prev - 1));
-          // Update the sale in our list to show as synced
           setSales(prev => prev.map(s => s.id === offlineId ? { ...s, id: result.saleId, synced: true } : s));
         }
-      } catch (e) { /* Will sync later */ }
+      } catch (e) { console.log("Immediate sync failed, will retry:", e); }
     }
 
+    playBeep();
     setCart([]);
     setShowPayment(false);
   };
