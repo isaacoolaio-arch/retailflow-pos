@@ -131,7 +131,8 @@ const api = {
     try {
       const res = await fetch(API_URL, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        // No Content-Type header → avoids CORS preflight that Apps Script rejects
+        // Apps Script reads e.postData.contents regardless
         body: JSON.stringify({ action, ...data, deviceId: DEVICE_ID }),
         redirect: "follow"
       });
