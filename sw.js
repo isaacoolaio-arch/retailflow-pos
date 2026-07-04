@@ -1,4 +1,4 @@
-var CACHE_NAME = 'oola-retailflow-v18';
+var CACHE_NAME = 'oola-retailflow-v20';
 var ASSETS = ['./', './index.html', './manifest.json'];
 
 self.addEventListener('install', function(event) {
