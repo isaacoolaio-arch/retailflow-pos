@@ -218,6 +218,26 @@ function useOnlineStatus() {
     }
   }, [online, pendingCount]);
 
+  // Periodic auto-sync safety net — every 30 seconds
+  useEffect(() => {
+    const autoSync = setInterval(async () => {
+      if (navigator.onLine && !syncing) {
+        const pending = await dbGetAll("pendingSales");
+        if (pending.length > 0) {
+          setSyncing(true);
+          const result = await syncPendingSales();
+          if (result.synced > 0) {
+            setLastSync(new Date());
+            const remaining = await dbGetAll("pendingSales");
+            setPendingCount(remaining.length);
+          }
+          setSyncing(false);
+        }
+      }
+    }, 30000);
+    return () => clearInterval(autoSync);
+  }, [syncing]);
+
   return { online, pendingCount, lastSync, syncing, setPendingCount };
 }
 
@@ -236,8 +256,18 @@ function useProducts() {
       // 1. Load from IndexedDB cache first (instant, works offline)
       try {
         const cached = await dbGetAll("products");
-        if (cached.length > 0) {
-          setProducts(cached);
+        // Filter out old demo products (they have specific demo barcodes)
+        const realProducts = cached.filter(function(p) {
+          // Demo products had barcodes like 890123456789X
+          return !(p.barcode && p.barcode.indexOf("890123456789") === 0);
+        });
+        if (realProducts.length !== cached.length) {
+          // Had demo data — clear and re-cache only real products
+          await dbClear("products");
+          if (realProducts.length > 0) await dbPut("products", realProducts);
+        }
+        if (realProducts.length > 0) {
+          setProducts(realProducts);
           setSource("cache");
           setLoading(false);
           loadedFromCache = true;
@@ -261,12 +291,10 @@ function useProducts() {
         } catch (e) { console.log("API load error:", e); }
       }
 
-      // 3. Fallback to demo data ONLY if cache was empty
+      // 3. No demo fallback — if empty, keep trying server
       if (!loadedFromCache) {
-        setProducts(MOCK_PRODUCTS);
-        setSource("demo");
-        // Seed the cache with demo data so it persists offline
-        try { await dbPut("products", MOCK_PRODUCTS); } catch(e) {}
+        // Only show empty state, real products come from server
+        setSource(navigator.onLine ? "api" : "cache");
       }
       setLoading(false);
     };
@@ -1939,6 +1967,18 @@ function RetailFlowPOS() {
               Close
             </button>
           </div>
+
+          <button onClick={async () => {
+            if (confirm("Clear all cached data and reload fresh from server?")) {
+              try {
+                await dbClear("products");
+                await dbClear("syncedSales");
+              } catch(e) {}
+              window.location.reload();
+            }
+          }} className="w-full py-2.5 rounded-lg bg-red-500/10 text-red-400 text-xs font-medium hover:bg-red-500/20 transition-all border border-red-500/20">
+            🗑️ Clear Cache & Reload Fresh
+          </button>
         </div>
       )}
 
