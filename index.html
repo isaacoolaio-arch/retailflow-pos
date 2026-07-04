@@ -24,6 +24,22 @@
         .ls{font-size:14px;margin:0}
         .lp{width:32px;height:32px;border:3px solid #27272a;border-top-color:#3b82f6;border-radius:50%;margin-top:24px;animation:sp .8s linear infinite}
         @keyframes sp{to{transform:rotate(360deg)}}
+        #barcode-reader video, #inv-barcode-reader video {
+            width: 100% !important;
+            height: auto !important;
+            display: block !important;
+            object-fit: cover !important;
+        }
+        #barcode-reader, #inv-barcode-reader {
+            min-height: 300px;
+        }
+        #barcode-reader__scan_region, #inv-barcode-reader__scan_region {
+            min-height: 300px;
+        }
+        #barcode-reader__scan_region video, #inv-barcode-reader__scan_region video {
+            width: 100% !important;
+            display: block !important;
+        }
     </style>
 </head>
 <body>
@@ -991,63 +1007,30 @@ function BarcodeScannerModal({ onScan, onClose }) {
 
         var config = { 
           fps: 10, 
-          qrbox: function(w, h) {
-            var min = Math.min(w, h);
-            return { width: Math.floor(min * 0.7), height: Math.floor(min * 0.5) };
-          },
-          aspectRatio: 1.0
+          qrbox: { width: 250, height: 150 },
+          videoConstraints: {
+            facingMode: "environment",
+            width: { ideal: 1280 },
+            height: { ideal: 720 }
+          }
         };
 
-        // Try to get rear camera explicitly (better for Samsung)
-        Html5Qrcode.getCameras().then(function(cameras) {
-          if (!mounted) return;
-          var cameraId = null;
-          if (cameras && cameras.length > 0) {
-            // Find rear/back camera
-            for (var i = 0; i < cameras.length; i++) {
-              var label = (cameras[i].label || "").toLowerCase();
-              if (label.indexOf("back") !== -1 || label.indexOf("rear") !== -1 || label.indexOf("environment") !== -1) {
-                cameraId = cameras[i].id;
-                break;
-              }
-            }
-            // If no rear found, use last camera (usually rear on phones)
-            if (!cameraId) cameraId = cameras[cameras.length - 1].id;
-          }
-
-          var camSource = cameraId ? cameraId : { facingMode: "environment" };
-
-          scanner.start(
-            camSource,
-            config,
-            function(decodedText) {
-              scanner.stop().then(function() { onScan(decodedText); }).catch(function() { onScan(decodedText); });
-            },
-            function(err) { /* ignore per-frame errors */ }
-          ).then(function() {
-            if (mounted) setScanning(true);
-          }).catch(function(err) {
-            if (mounted) setError("Camera failed to start. Grant camera permission in Chrome settings, then try again.");
-          });
+        scanner.start(
+          { facingMode: "environment" },
+          config,
+          function(decodedText) {
+            scanner.stop().then(function() { onScan(decodedText); }).catch(function() { onScan(decodedText); });
+          },
+          function(err) { /* ignore per-frame errors */ }
+        ).then(function() {
+          if (mounted) setScanning(true);
         }).catch(function(err) {
-          // Fallback: try facingMode directly
-          scanner.start(
-            { facingMode: "environment" },
-            config,
-            function(decodedText) {
-              scanner.stop().then(function() { onScan(decodedText); }).catch(function() { onScan(decodedText); });
-            },
-            function(err) {}
-          ).then(function() {
-            if (mounted) setScanning(true);
-          }).catch(function(e) {
-            if (mounted) setError("Camera access denied. Allow camera in Chrome: Settings > Site settings > Camera.");
-          });
+          if (mounted) setError("Camera failed. Grant permission: Chrome menu > Settings > Site settings > Camera > Allow this site.");
         });
       } catch(e) {
         if (mounted) setError("Scanner error: " + e.message);
       }
-    }, 300);
+    }, 400);
 
     return function() {
       mounted = false;
